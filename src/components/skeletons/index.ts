@@ -1,0 +1,10 @@
+export { default as Skeleton } from './Skeleton';
+export type { SkeletonProps } from './Skeleton';
+export { default as StatCardSkeleton } from './StatCardSkeleton';
+export { default as TableRowSkeleton } from './TableRowSkeleton';
+export { default as StudentListSkeleton } from './StudentListSkeleton';
+export { default as StudentProfileSkeleton } from './StudentProfileSkeleton';
+export { default as AttendanceTableSkeleton } from './AttendanceTableSkeleton';
+export { default as DocumentListSkeleton } from './DocumentListSkeleton';
+export { default as ChartSkeleton } from './ChartSkeleton';
+export { default as DashboardSkeleton } from './DashboardSkeleton';
