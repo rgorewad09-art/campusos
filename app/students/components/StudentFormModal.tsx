@@ -46,6 +46,7 @@ export default function StudentFormModal({
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [enrolledStudent, setEnrolledStudent] = useState<Student | null>(null);
+  const [inviteDispatched, setInviteDispatched] = useState<boolean | null>(null);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -100,7 +101,9 @@ export default function StudentFormModal({
     if (!formData.enrollment_date) {
       newErrors.enrollment_date = 'Enrollment date is required.';
     }
-    if (formData.email && formData.email.trim()) {
+    if (!formData.email || !formData.email.trim()) {
+      newErrors.email = 'Student email is required for account activation.';
+    } else {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(formData.email.trim())) {
         newErrors.email = 'Please enter a valid email address.';
@@ -134,6 +137,7 @@ export default function StudentFormModal({
           setGeneralError(result.error || 'Failed to enroll student.');
         } else {
           setEnrolledStudent(result.student);
+          setInviteDispatched(Boolean(result.invitationSent));
           onSuccess(result.student);
         }
       }
@@ -212,6 +216,18 @@ export default function StudentFormModal({
               </p>
               <p className="mt-1 text-xs font-medium text-[#171717]">
                 {enrolledStudent.first_name} {enrolledStudent.last_name}
+              </p>
+            </div>
+
+            {/* Account Activation Notice */}
+            <div className="mt-4 max-w-sm mx-auto rounded-lg border border-[#E5E5E5] bg-white p-3 text-left shadow-sm">
+              <p className="text-xs font-semibold text-[#171717]">
+                {inviteDispatched ? '✓ Activation Email Dispatched' : '• Account Activation Notice'}
+              </p>
+              <p className="text-[11px] text-[#737373] mt-1 leading-relaxed">
+                {inviteDispatched
+                  ? `An account activation email was sent to ${enrolledStudent.email}.`
+                  : `Student record created with ID ${enrolledStudent.student_code}. Account activation invitation is pending external SMTP or redirect URL configuration.`}
               </p>
             </div>
 
@@ -375,13 +391,14 @@ export default function StudentFormModal({
               <div>
                 <label
                   htmlFor="email"
-                  className="block text-xs font-medium text-[#737373] mb-1"
+                  className="block text-xs font-medium text-[#171717] mb-1"
                 >
-                  Email Address (Optional)
+                  Email Address <span className="text-[#171717] font-bold">*</span>
                 </label>
                 <input
                   id="email"
                   type="email"
+                  required
                   placeholder="student@example.com"
                   value={formData.email || ''}
                   onChange={(e) =>

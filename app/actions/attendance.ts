@@ -33,8 +33,8 @@ async function requireAdmin() {
     .eq('id', user.id)
     .maybeSingle();
 
-  if (profileError || !profile || profile.role !== 'admin') {
-    throw new Error('Forbidden: Only authorized administrators can perform this action.');
+  if (profileError || !profile || !['admin', 'teacher'].includes(profile.role)) {
+    throw new Error('Forbidden: Only authorized faculty or administrators can perform this action.');
   }
 
   return { supabase, user };

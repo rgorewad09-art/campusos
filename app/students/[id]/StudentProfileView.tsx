@@ -15,6 +15,8 @@ import {
   AlertCircle,
   Lock,
   UserX,
+  Send,
+  Check,
 } from 'lucide-react';
 import AppShell from '../../components/AppShell';
 import StatusBadge from '../components/StatusBadge';
@@ -22,7 +24,7 @@ import EditStudentModal from './components/EditStudentModal';
 import GuardianSection from './components/GuardianSection';
 import DocumentSection from './components/DocumentSection';
 import StudentAttendanceSection from './components/StudentAttendanceSection';
-import { getStudentByIdAction } from '@/app/actions/students';
+import { getStudentByIdAction, resendStudentInviteAction } from '@/app/actions/students';
 import type { Student } from '@/src/types/student';
 import StudentProfileSkeleton from '@/src/components/skeletons/StudentProfileSkeleton';
 
@@ -38,6 +40,54 @@ export default function StudentProfileView({ studentId }: StudentProfileViewProp
   const [notFound, setNotFound] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState<string | null>(null);
+  const [resendError, setResendError] = useState<string | null>(null);
+  const [resendDevLink, setResendDevLink] = useState<string | null>(null);
+  const [copiedResendLink, setCopiedResendLink] = useState(false);
+
+  async function handleResendInvite() {
+    if (!student) return;
+
+    setResendError(null);
+    setResendSuccess(null);
+    setResendDevLink(null);
+
+    // Validate email presence before submitting
+    if (!student.email || student.email.trim() === '') {
+      setResendError(
+        'This student does not have an email address on file. Please click "Edit Profile" and provide an email address before sending an activation invitation.'
+      );
+      return;
+    }
+
+    if (student.status === 'graduated') {
+      setResendError('Cannot send an activation invitation to a graduated student.');
+      return;
+    }
+
+    setIsResending(true);
+
+    try {
+      const res = await resendStudentInviteAction(student.id);
+      if (res.success) {
+        setResendSuccess(
+          res.message || `Activation invitation successfully processed for ${student.first_name} (${student.email}).`
+        );
+        if (res.activationLink) {
+          setResendDevLink(res.activationLink);
+        }
+      } else {
+        setResendError(res.error || 'Failed to dispatch activation invitation. Please try again.');
+      }
+    } catch (err: unknown) {
+      setResendError(
+        err instanceof Error ? err.message : 'An unexpected error occurred while sending the activation invitation.'
+      );
+    } finally {
+      setIsResending(false);
+    }
+  }
 
   const fetchStudent = useCallback(async () => {
     if (!studentId) return;
@@ -181,16 +231,119 @@ export default function StudentProfileView({ studentId }: StudentProfileViewProp
                   </div>
                 </div>
 
-                {/* Edit Action Button */}
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(true)}
-                  className="flex items-center gap-1.5 rounded-md border border-[#171717] bg-[#171717] px-4 py-2 text-xs font-medium text-white hover:bg-[#262626] transition-colors self-start sm:self-auto"
-                >
-                  <Edit2 size={13} />
-                  <span>Edit Profile</span>
-                </button>
+                {/* Actions */}
+                <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
+                  {/* Send Activation Invite Button */}
+                  <button
+                    type="button"
+                    disabled={isResending}
+                    onClick={handleResendInvite}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E5E5] bg-white px-3.5 py-2 text-xs font-medium text-[#171717] hover:bg-[#F7F7F7] hover:border-[#171717] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                    title={
+                      !student.email
+                        ? 'Student has no email address on file'
+                        : 'Send account activation invitation and generate password setup link'
+                    }
+                  >
+                    {isResending ? (
+                      <Loader2 size={13} className="animate-spin text-[#171717]" />
+                    ) : (
+                      <Send size={13} />
+                    )}
+                    <span>{isResending ? 'Sending Invite...' : 'Send Activation Invite'}</span>
+                  </button>
+
+                  {/* Edit Action Button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-[#171717] bg-[#171717] px-4 py-2 text-xs font-medium text-white hover:bg-[#262626] transition-colors shadow-sm"
+                  >
+                    <Edit2 size={13} />
+                    <span>Edit Profile</span>
+                  </button>
+                </div>
               </div>
+
+              {/* Activation Error Alert */}
+              {resendError && (
+                <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-[#FCA5A5] bg-[#FEF2F2] p-3 text-xs text-[#991B1B]">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle size={15} className="mt-0.5 shrink-0 text-[#DC2626]" />
+                    <div>
+                      <p className="font-semibold">Activation Notice</p>
+                      <p className="mt-0.5 text-[#B91C1C]">{resendError}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setResendError(null)}
+                    className="text-[#991B1B] hover:text-[#7F1D1D] text-xs font-semibold px-1"
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Activation Success & Link Card */}
+              {resendSuccess && (
+                <div className="mt-4 rounded-lg border border-[#E5E5E5] bg-[#F7F7F7] p-4 text-xs text-[#171717]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2 text-emerald-800">
+                      <Check size={16} className="text-emerald-600 shrink-0" />
+                      <span className="font-semibold">{resendSuccess}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResendSuccess(null);
+                        setResendDevLink(null);
+                      }}
+                      className="text-[#737373] hover:text-[#171717] text-xs font-semibold px-1"
+                      title="Dismiss"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {resendDevLink && (
+                    <div className="mt-3 rounded-md border border-[#E5E5E5] bg-white p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] font-semibold text-[#171717]">
+                          Activation Link (Direct / Development Setup)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await navigator.clipboard.writeText(resendDevLink);
+                            setCopiedResendLink(true);
+                            setTimeout(() => setCopiedResendLink(false), 2000);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded bg-[#171717] px-3 py-1 text-[11px] font-medium text-white hover:bg-[#262626] transition-colors"
+                        >
+                          {copiedResendLink ? (
+                            <>
+                              <Check size={12} className="text-emerald-400" />
+                              <span>Copied Link!</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>Copy Link</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <p className="font-mono text-[11px] text-[#525252] break-all select-all bg-[#FAFAFA] p-2.5 rounded border border-[#F0F0F0]">
+                        {resendDevLink}
+                      </p>
+                      <p className="mt-2 text-[11px] text-[#737373]">
+                        Share this link with the student to verify their email and set their CampusOS password.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Academic & Personal Details Card */}

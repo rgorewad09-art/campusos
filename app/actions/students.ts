@@ -1,8 +1,16 @@
 'use server';
 
+import { headers } from 'next/headers';
 import { createClient } from '@/src/lib/supabase/server';
+import { createAdminClient } from '@/src/lib/supabase/admin';
 import { logAuditAction } from '@/src/lib/audit';
-import { isValidUuid, sanitizePostgrestSearch, isAuthError } from '@/src/lib/security';
+import {
+  isValidUuid,
+  sanitizePostgrestSearch,
+  isAuthError,
+  getPublicAppUrl,
+  buildActivationLink,
+} from '@/src/lib/security';
 import type {
   Student,
   StudentFormData,
@@ -58,11 +66,12 @@ function validateStudentData(data: StudentFormData): { valid: boolean; error?: s
   if (!data.enrollment_date) {
     return { valid: false, error: 'Enrollment date is required.' };
   }
-  if (data.email && data.email.trim().length > 0) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(data.email.trim())) {
-      return { valid: false, error: 'Please enter a valid email address.' };
-    }
+  if (!data.email || data.email.trim().length === 0) {
+    return { valid: false, error: 'Student email is required for account activation.' };
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(data.email.trim())) {
+    return { valid: false, error: 'Please enter a valid email address.' };
   }
   const validStatuses = ['active', 'inactive', 'pending', 'suspended', 'graduated'];
   if (!validStatuses.includes(data.status)) {
@@ -181,7 +190,13 @@ export async function getStudentByIdAction(
  */
 export async function enrollStudentAction(
   formData: StudentFormData
-): Promise<{ success: boolean; student?: Student; error?: string }> {
+): Promise<{
+  success: boolean;
+  student?: Student;
+  invitationSent?: boolean;
+  activationLink?: string;
+  error?: string;
+}> {
   try {
     const { supabase, user } = await requireAdmin();
 
@@ -190,12 +205,28 @@ export async function enrollStudentAction(
       return { success: false, error: validation.error };
     }
 
+    const cleanEmail = formData.email.trim().toLowerCase();
+
+    // Check if a student with this email is already registered
+    const { data: existingStudent } = await supabase
+      .from('students')
+      .select('id, student_code')
+      .ilike('email', cleanEmail)
+      .maybeSingle();
+
+    if (existingStudent) {
+      return {
+        success: false,
+        error: `A student with email "${cleanEmail}" is already registered (College ID: ${existingStudent.student_code}).`,
+      };
+    }
+
     const payload = {
       first_name: formData.first_name.trim(),
       middle_name: formData.middle_name?.trim() || null,
       last_name: formData.last_name.trim(),
       date_of_birth: formData.date_of_birth,
-      email: formData.email?.trim() || null,
+      email: cleanEmail,
       phone: formData.phone?.trim() || null,
       enrollment_date: formData.enrollment_date,
       status: formData.status,
@@ -217,6 +248,104 @@ export async function enrollStudentAction(
     }
 
     const enrolled = data as Student;
+    let inviteSent = false;
+    let activationLink: string | undefined;
+
+    // Secure server-side Supabase Auth account invitation (Option 1)
+    const adminClient = createAdminClient();
+    if (adminClient) {
+      try {
+        const headerList = await headers();
+        const origin = getPublicAppUrl(headerList);
+        const redirectTo = `${origin}/auth/confirm?next=/activate/password`;
+
+        const { data: inviteData, error: inviteError } =
+          await adminClient.auth.admin.inviteUserByEmail(cleanEmail, {
+            data: {
+              student_id: enrolled.id,
+              student_code: enrolled.student_code,
+              role: 'student',
+            },
+            redirectTo,
+          });
+
+        if (inviteError) {
+          console.warn('[CampusOS Students] Supabase invitation notice:', inviteError.message);
+
+          // In development mode or if email delivery is restricted, generate safe link
+          if (process.env.NODE_ENV !== 'production' || inviteError.message.includes('rate')) {
+            const { data: linkData } = await adminClient.auth.admin.generateLink({
+              type: 'invite',
+              email: cleanEmail,
+              options: {
+                data: {
+                  student_id: enrolled.id,
+                  student_code: enrolled.student_code,
+                  role: 'student',
+                },
+                redirectTo,
+              },
+            });
+            if (linkData?.properties) {
+              activationLink = buildActivationLink(origin, linkData.properties);
+              if (linkData.user) {
+                await adminClient
+                  .from('students')
+                  .update({ user_id: linkData.user.id })
+                  .eq('id', enrolled.id);
+
+                const studentDisplayName = [formData.first_name.trim(), formData.last_name.trim()]
+                  .filter(Boolean)
+                  .join(' ');
+
+                await adminClient.from('profiles').upsert({
+                  id: linkData.user.id,
+                  display_name: studentDisplayName || 'Student',
+                  role: 'student',
+                });
+              }
+            }
+          }
+        } else if (inviteData?.user) {
+          inviteSent = true;
+
+          // Link student record to the newly provisioned auth account
+          await adminClient
+            .from('students')
+            .update({ user_id: inviteData.user.id })
+            .eq('id', enrolled.id);
+
+          const studentDisplayName = [formData.first_name.trim(), formData.last_name.trim()]
+            .filter(Boolean)
+            .join(' ');
+
+          // Ensure profile is assigned role = 'student' with required display_name
+          await adminClient
+            .from('profiles')
+            .upsert({
+              id: inviteData.user.id,
+              display_name: studentDisplayName || 'Student',
+              role: 'student',
+            });
+
+          // Provide direct activation link for immediate setup and copying
+          const { data: devLink } = await adminClient.auth.admin.generateLink({
+            type: 'magiclink',
+            email: cleanEmail,
+            options: { redirectTo },
+          });
+          if (devLink?.properties) {
+            activationLink = buildActivationLink(origin, devLink.properties);
+          }
+        }
+      } catch (inviteEx) {
+        console.error('[CampusOS Students] Server-side invite dispatch error:', inviteEx);
+      }
+    } else {
+      console.info(
+        `[CampusOS Students] Enrolled ${enrolled.student_code}. SUPABASE_SERVICE_ROLE_KEY is pending in .env.local; invite will be dispatched once configured.`
+      );
+    }
 
     // Record server-side audit log
     await logAuditAction({
@@ -227,10 +356,17 @@ export async function enrollStudentAction(
       details: {
         student_code: enrolled.student_code,
         name: `${enrolled.first_name} ${enrolled.last_name}`,
+        email: cleanEmail,
+        invite_dispatched: inviteSent,
       },
     });
 
-    return { success: true, student: enrolled };
+    return {
+      success: true,
+      student: enrolled,
+      invitationSent: inviteSent,
+      activationLink,
+    };
   } catch (err: unknown) {
     console.error('[CampusOS Students] enrollStudentAction unhandled error:', err);
     const message =
@@ -367,3 +503,176 @@ export async function deleteStudentAction(
     return { success: false, error: message };
   }
 }
+
+/**
+ * Resends the account activation invitation for an existing enrolled student.
+ * Uses the server-only admin client to dispatch via Supabase Auth Admin.
+ * In development, returns the direct activation link for safe testing.
+ */
+export async function resendStudentInviteAction(studentId: string): Promise<{
+  success: boolean;
+  message?: string;
+  activationLink?: string;
+  error?: string;
+}> {
+  try {
+    const { supabase, user } = await requireAdmin();
+
+    const adminClient = createAdminClient();
+    if (!adminClient) {
+      return {
+        success: false,
+        error: 'Server configuration error: SUPABASE_SERVICE_ROLE_KEY is not configured.',
+      };
+    }
+
+    // 1. Fetch student record
+    const { data: student, error: studentError } = await supabase
+      .from('students')
+      .select('id, student_code, first_name, last_name, email, status, user_id')
+      .eq('id', studentId)
+      .maybeSingle();
+
+    if (studentError || !student) {
+      return { success: false, error: 'Student record not found.' };
+    }
+
+    if (!student.email) {
+      return {
+        success: false,
+        error: 'This student does not have an email address on file. Please edit the student profile to add an email first.',
+      };
+    }
+
+    if (student.status === 'graduated') {
+      return {
+        success: false,
+        error: 'Cannot dispatch activation for a graduated student.',
+      };
+    }
+
+    const headerList = await headers();
+    const origin = getPublicAppUrl(headerList);
+    const redirectTo = `${origin}/auth/confirm?next=/activate/password`;
+    const cleanEmail = student.email.trim().toLowerCase();
+
+    let activationLink: string | undefined;
+    let inviteSent = false;
+
+    // Check if the user already exists in auth.users
+    if (student.user_id) {
+      // User exists in auth.users -> generate recovery/magiclink for password setup
+      const { data: linkData, error: linkError } =
+        await adminClient.auth.admin.generateLink({
+          type: 'magiclink',
+          email: cleanEmail,
+          options: { redirectTo },
+        });
+
+      if (!linkError && linkData?.properties) {
+        activationLink = buildActivationLink(origin, linkData.properties);
+        inviteSent = true;
+      }
+    } else {
+      // User does not exist in auth.users -> generate invite
+      const { data: inviteData, error: inviteError } =
+        await adminClient.auth.admin.inviteUserByEmail(cleanEmail, {
+          data: {
+            student_id: student.id,
+            student_code: student.student_code,
+            role: 'student',
+          },
+          redirectTo,
+        });
+
+      if (!inviteError && inviteData?.user) {
+        inviteSent = true;
+        // Link user_id
+        await adminClient
+          .from('students')
+          .update({ user_id: inviteData.user.id })
+          .eq('id', student.id);
+
+        const studentDisplayName = [student.first_name, student.last_name]
+          .filter(Boolean)
+          .join(' ');
+
+        await adminClient.from('profiles').upsert({
+          id: inviteData.user.id,
+          display_name: studentDisplayName || 'Student',
+          role: 'student',
+        });
+
+        // Provide direct activation link for immediate setup and copying
+        const { data: devLink } = await adminClient.auth.admin.generateLink({
+          type: 'magiclink',
+          email: cleanEmail,
+          options: { redirectTo },
+        });
+        if (devLink?.properties) {
+          activationLink = buildActivationLink(origin, devLink.properties);
+        }
+      } else {
+        // Fallback to generateLink
+        const { data: linkData } = await adminClient.auth.admin.generateLink({
+          type: 'invite',
+          email: cleanEmail,
+          options: {
+            data: {
+              student_id: student.id,
+              student_code: student.student_code,
+              role: 'student',
+            },
+            redirectTo,
+          },
+        });
+        if (linkData?.properties) {
+          activationLink = buildActivationLink(origin, linkData.properties);
+          inviteSent = true;
+          if (linkData.user) {
+            await adminClient
+              .from('students')
+              .update({ user_id: linkData.user.id })
+              .eq('id', student.id);
+
+            const studentDisplayName = [student.first_name, student.last_name]
+              .filter(Boolean)
+              .join(' ');
+
+            await adminClient.from('profiles').upsert({
+              id: linkData.user.id,
+              display_name: studentDisplayName || 'Student',
+              role: 'student',
+            });
+          }
+        }
+      }
+    }
+
+    // Audit log
+    await logAuditAction({
+      actorId: user.id,
+      action: 'STUDENT_INVITE_DISPATCHED',
+      entityType: 'student',
+      entityId: student.id,
+      details: {
+        student_code: student.student_code,
+        email: cleanEmail,
+        invite_sent: inviteSent,
+      },
+    });
+
+    return {
+      success: true,
+      message: `Activation invitation successfully processed for ${student.student_code} (${cleanEmail}).`,
+      activationLink: activationLink || undefined,
+    };
+  } catch (err: unknown) {
+    console.error('[CampusOS Students] resendStudentInviteAction error:', err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Failed to dispatch activation invitation.',
+    };
+  }
+}
+

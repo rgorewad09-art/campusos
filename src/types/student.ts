@@ -4,6 +4,8 @@
  * TypeScript types for CampusOS student management.
  */
 
+export type UserRole = 'admin' | 'teacher' | 'student';
+
 export type StudentStatus = 'active' | 'inactive' | 'pending' | 'suspended' | 'graduated';
 
 export interface Student {
@@ -18,6 +20,7 @@ export interface Student {
   enrollment_date: string;
   status: StudentStatus;
   created_by: string | null;
+  user_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -27,7 +30,7 @@ export interface StudentFormData {
   middle_name?: string;
   last_name: string;
   date_of_birth: string;
-  email?: string;
+  email: string;
   phone?: string;
   enrollment_date: string;
   status: StudentStatus;

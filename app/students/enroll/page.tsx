@@ -35,6 +35,9 @@ export default function EnrollStudentPage() {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [enrolledStudent, setEnrolledStudent] = useState<Student | null>(null);
+  const [inviteDispatched, setInviteDispatched] = useState<boolean | null>(null);
+  const [activationLink, setActivationLink] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -62,7 +65,9 @@ export default function EnrollStudentPage() {
     if (!formData.enrollment_date) {
       newErrors.enrollment_date = 'Enrollment date is required.';
     }
-    if (formData.email && formData.email.trim()) {
+    if (!formData.email || !formData.email.trim()) {
+      newErrors.email = 'Student email is required for account activation.';
+    } else {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(formData.email.trim())) {
         newErrors.email = 'Please enter a valid email address.';
@@ -87,6 +92,8 @@ export default function EnrollStudentPage() {
         setGeneralError(result.error || 'Failed to enroll student.');
       } else {
         setEnrolledStudent(result.student);
+        setInviteDispatched(Boolean(result.invitationSent));
+        setActivationLink(result.activationLink || null);
       }
     } catch (err: unknown) {
       setGeneralError(err instanceof Error ? err.message : 'An unexpected error occurred.');
@@ -97,6 +104,8 @@ export default function EnrollStudentPage() {
 
   function handleEnrollAnother() {
     setEnrolledStudent(null);
+    setActivationLink(null);
+    setCopiedLink(false);
     setFormData({
       first_name: '',
       middle_name: '',
@@ -161,6 +170,40 @@ export default function EnrollStudentPage() {
                 <p className="mt-1.5 text-xs font-medium text-[#171717]">
                   {enrolledStudent.first_name} {enrolledStudent.last_name}
                 </p>
+              </div>
+
+              {/* Account Activation Notice */}
+              <div className="mt-4 max-w-sm mx-auto rounded-lg border border-[#E5E5E5] bg-white p-3.5 text-left shadow-sm">
+                <p className="text-xs font-semibold text-[#171717]">
+                  {inviteDispatched ? '✓ Activation Email Dispatched' : '• Account Activation Notice'}
+                </p>
+                <p className="text-[11px] text-[#737373] mt-1 leading-relaxed">
+                  {inviteDispatched
+                    ? `An account activation email was sent to ${enrolledStudent.email}. The student can follow the link to establish their password.`
+                    : `Student record created with ID ${enrolledStudent.student_code}. Account activation invitation is pending external SMTP or redirect URL configuration.`}
+                </p>
+
+                {activationLink && (
+                  <div className="mt-3 border-t border-[#E5E5E5] pt-2.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-[#171717]">Direct Activation Link</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(activationLink);
+                          setCopiedLink(true);
+                          setTimeout(() => setCopiedLink(false), 2000);
+                        }}
+                        className="text-[#171717] font-medium hover:underline cursor-pointer"
+                      >
+                        {copiedLink ? '✓ Copied' : 'Copy link'}
+                      </button>
+                    </div>
+                    <p className="mt-1 font-mono text-[10px] text-[#737373] break-all select-all bg-[#F7F7F7] p-1.5 rounded">
+                      {activationLink}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -327,13 +370,15 @@ export default function EnrollStudentPage() {
                 <div>
                   <label
                     htmlFor="email"
-                    className="block text-xs font-medium text-[#737373] mb-1.5"
+                    className="block text-xs font-medium text-[#171717] mb-1.5"
                   >
-                    Email Address (Optional)
+                    Email Address <span className="text-[#171717] font-bold">*</span>{' '}
+                    <span className="text-[11px] text-[#737373] font-normal">(Used for activation invite)</span>
                   </label>
                   <input
                     id="email"
                     type="email"
+                    required
                     placeholder="student@example.com"
                     value={formData.email || ''}
                     onChange={(e) =>

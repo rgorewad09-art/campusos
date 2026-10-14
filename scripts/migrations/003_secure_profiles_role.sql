@@ -5,24 +5,27 @@
 -- ==============================================================================
 --
 -- SECURITY ARCHITECTURE & BEHAVIOR:
--- 1. Strict Search Path:
---    The SECURITY DEFINER function sets search_path = '' and fully qualifies all
---    references to pg_catalog, eliminating search path hijacking risks.
+-- 1. No CURRENT_USER Bypass:
+--    Avoids using CURRENT_USER to establish caller identity. In a SECURITY DEFINER
+--    function, CURRENT_USER always evaluates to the function owner (postgres),
+--    which previously created an unintended bypass.
 --
--- 2. No Application Role Mutations:
---    Role changes are rejected for ALL application users (including existing
---    administrators) when connecting via the standard PostgREST application API.
---    This prevents privilege escalation even in the event of administrator session theft.
+-- 2. Strict Execution Environment Isolation:
+--    - PostgREST API requests: The trigger verifies request.jwt.claim.role.
+--      Only 'service_role' (cryptographically verified by PostgREST via JWT secret)
+--      can bypass role restrictions.
+--    - Direct database sessions (psql, Supabase SQL Editor, migrations):
+--      When request.jwt.claim.role is absent, the trigger verifies that
+--      SESSION_USER is a genuine database administrator ('postgres', 'supabase_admin').
 --
--- 3. Dedicated Service Role / Admin Bypass:
---    Only direct database sessions ('postgres') or verified Supabase 'service_role'
---    connections (validated cryptographically by PostgREST via JWT_SECRET) can
---    assign or modify user roles.
+-- 3. Strict Application Role Immutability:
+--    - UPDATE: Any attempt by application users ('authenticated', 'anon') to change
+--      'role' is unconditionally rejected with error 42501.
+--    - INSERT: Application users cannot assign elevated roles ('admin', 'teacher').
 --
--- 4. INSERT Hardening:
---    Prevents creation of new 'admin' accounts through client signup or direct
---    INSERT calls. Initial admin provisioning remains fully functional via direct
---    database migrations, seed scripts, or service_role operations.
+-- 4. Legitimate Server-Side Provisioning:
+--    Administrative provisioning remains fully functional via server actions utilizing
+--    the server-only SUPABASE_SERVICE_ROLE_KEY (adminClient) or direct SQL migrations.
 -- ==============================================================================
 
 BEGIN;
@@ -39,17 +42,24 @@ DECLARE
   v_normalized_new_role text;
 BEGIN
   -- ---------------------------------------------------------------------------
-  -- 1. Check for trusted administrative execution environments:
-  --    - Direct PostgreSQL session as 'postgres' or 'service_role'
-  --    - Authenticated API request utilizing the Supabase service_role key
+  -- 1. Identify execution context:
+  --    Extract the verified JWT role set by PostgREST from the incoming request.
   -- ---------------------------------------------------------------------------
-  IF pg_catalog.current_user IN ('postgres', 'service_role') THEN
-    RETURN NEW;
-  END IF;
-
   v_jwt_role := pg_catalog.nullif(pg_catalog.current_setting('request.jwt.claim.role', true), '');
-  IF v_jwt_role = 'service_role' THEN
-    RETURN NEW;
+
+  IF v_jwt_role IS NOT NULL THEN
+    -- A. PostgREST API Request:
+    -- Only requests authenticated with the Supabase service_role key may bypass
+    IF v_jwt_role = 'service_role' THEN
+      RETURN NEW;
+    END IF;
+    -- Any other API caller ('authenticated', 'anon', etc.) proceeds to strict checks below
+  ELSE
+    -- B. Direct Database Session (psql, Supabase SQL Editor, migrations):
+    -- Only genuine database administrators may bypass
+    IF SESSION_USER IN ('postgres', 'supabase_admin') THEN
+      RETURN NEW;
+    END IF;
   END IF;
 
   -- ---------------------------------------------------------------------------
@@ -68,13 +78,13 @@ BEGIN
 
   -- ---------------------------------------------------------------------------
   -- 3. Handle INSERT operations:
-  --    Ordinary users and client requests cannot assign the 'admin' role.
-  --    Only trusted service_role or database administrators can create admins.
+  --    Ordinary users and client requests cannot assign 'admin' or 'teacher' roles.
+  --    Only trusted service_role or database administrators can create elevated roles.
   -- ---------------------------------------------------------------------------
   IF TG_OP = 'INSERT' THEN
-    v_normalized_new_role := pg_catalog.lower(pg_catalog.trim(pg_catalog.coalesce(NEW.role, '')));
-    IF v_normalized_new_role = 'admin' THEN
-      RAISE EXCEPTION 'Access denied: administrator account provisioning requires service_role or database administrator privileges.'
+    v_normalized_new_role := pg_catalog.lower(pg_catalog.trim(COALESCE(NEW.role, '')));
+    IF v_normalized_new_role IN ('admin', 'teacher') THEN
+      RAISE EXCEPTION 'Access denied: administrative and staff account provisioning requires service_role or database administrator privileges.'
         USING ERRCODE = '42501';
     END IF;
 
@@ -86,7 +96,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.protect_profiles_role() IS 
-'Enforces immutability on public.profiles.role for application callers, preventing privilege escalation.';
+'Enforces role immutability on public.profiles for application callers without relying on CURRENT_USER.';
 
 -- 2. Bind the trigger to public.profiles for both INSERT and UPDATE
 DROP TRIGGER IF EXISTS trg_protect_profiles_role ON public.profiles;

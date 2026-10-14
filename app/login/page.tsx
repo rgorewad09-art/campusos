@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { loginAction } from '@/app/actions/auth';
 import { getSafeRedirectUrl } from '@/src/lib/security';
@@ -14,7 +15,9 @@ function LoginForm() {
 
   const [errorMessage, setErrorMessage] = useState<string | null>(
     urlError === 'unauthorized'
-      ? 'Access denied: Your account is not authorized as an administrator.'
+      ? 'Access denied: Please sign in with an authorized account.'
+      : urlError === 'activation_link_invalid'
+      ? 'The activation link is invalid or expired. Please contact your administrator.'
       : null
   );
   const [isPending, startTransition] = useTransition();
@@ -31,7 +34,9 @@ function LoginForm() {
       if (result?.error) {
         setErrorMessage(result.error);
       } else if (result?.success) {
-        router.push(redirectTo);
+        const targetUrl =
+          redirectTo !== '/' ? redirectTo : result.destination || '/';
+        router.push(targetUrl);
         router.refresh();
       }
     });
@@ -48,14 +53,14 @@ function LoginForm() {
               Campus<span className="text-[#737373]">OS</span>
             </span>
             <span className="rounded border border-[#E5E5E5] bg-[#F7F7F7] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#737373]">
-              Admin
+              Portal
             </span>
           </div>
           <h1 className="mt-6 text-lg font-semibold text-[#171717]">
-            Administrator Sign In
+            Sign In to CampusOS
           </h1>
           <p className="mt-1 text-xs text-[#737373]">
-            Enter your credentials to access the management portal.
+            Enter your credentials to access your dashboard.
           </p>
         </div>
 
@@ -75,18 +80,18 @@ function LoginForm() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label
-              htmlFor="email"
+              htmlFor="identifier"
               className="block text-xs font-medium text-[#171717] mb-1.5"
             >
-              Email address
+              Email address or College ID
             </label>
             <input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
+              id="identifier"
+              name="identifier"
+              type="text"
+              autoComplete="username"
               required
-              placeholder="admin@campusos.com"
+              placeholder="admin@campusos.com or STU-2026-0001"
               disabled={isPending}
               className="w-full rounded-md border border-[#E5E5E5] bg-white px-3 py-2 text-sm text-[#171717] placeholder:text-[#A3A3A3] focus:border-[#171717] focus:outline-none transition-colors disabled:bg-[#FAFAFA] disabled:cursor-not-allowed"
             />
@@ -128,15 +133,31 @@ function LoginForm() {
         </form>
 
         {/* Footer info */}
-        <div className="mt-8 border-t border-[#E5E5E5] pt-4 text-center">
+        <div className="mt-8 border-t border-[#E5E5E5] pt-4 space-y-2 text-center">
           <p className="text-[11px] text-[#737373]">
-            Restricted access. Authorized administrator accounts only.
+            Access restricted to registered Administrators, Faculty, and Students.
           </p>
+          <div className="pt-1 text-[11px] text-[#737373]">
+            Direct portals:{' '}
+            <Link
+              href="/student/login"
+              className="font-medium text-[#171717] hover:underline"
+            >
+              Student Portal
+            </Link>
+            {' '}&bull;{' '}
+            <Link
+              href="/teacher/login"
+              className="font-medium text-[#171717] hover:underline"
+            >
+              Faculty Portal
+            </Link>
+          </div>
         </div>
       </div>
 
       <p className="mt-6 text-center text-[11px] text-[#A3A3A3]">
-        CampusOS v1.0 &bull; Secure Administrator Environment
+        CampusOS &bull; Unified College Management System
       </p>
     </div>
   );

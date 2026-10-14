@@ -30,7 +30,6 @@ ON CONFLICT (id) DO UPDATE SET
 
 -- Step 3: Storage Row Level Security Policies for student-documents
 -- Enable RLS on storage.objects (if not already enabled)
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 
 -- 3a. Storage: Admin Upload Policy
 DROP POLICY IF EXISTS "Admins can upload student documents" ON storage.objects;
