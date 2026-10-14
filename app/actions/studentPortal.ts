@@ -30,8 +30,8 @@ export interface StudentDashboardData {
 
 /**
  * Server-side authorization check for Student Portal.
- * Verifies caller is authenticated, holds role = 'student' in public.profiles,
- * and possesses a linked student record in public.students.
+ * Verifies caller is authenticated, possesses an active linked student record in public.students,
+ * and maintains consistent role = 'student' in public.profiles.
  */
 async function requireStudent() {
   const supabase = await createClient();
@@ -44,48 +44,81 @@ async function requireStudent() {
     throw new Error('Unauthorized: Please sign in to access the Student Portal.');
   }
 
-  // 1. Verify role
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .maybeSingle();
+  const adminClient = createAdminClient();
+  const dbClient = adminClient || supabase;
 
-  if (profile?.role !== 'student') {
-    throw new Error('Forbidden: Only authorized students can access this area.');
-  }
-
-  // 2. Locate linked student record via user_id or matching email
-  let { data: student } = await supabase
+  // 1. Check existing linked student record via user_id
+  let { data: student } = await dbClient
     .from('students')
     .select('*')
     .eq('user_id', user.id)
     .maybeSingle();
 
-  // Self-heal link if user_id is pending but email matches verified auth account
-  if (!student && user.email) {
-    const adminClient = createAdminClient();
-    const dbClient = adminClient || supabase;
-
-    const { data: matchedByEmail } = await dbClient
+  // 2. If not yet linked, verify unambiguous match against verified email
+  const isEmailVerified = Boolean(user.email_confirmed_at || user.confirmed_at);
+  if (!student && user.email && isEmailVerified) {
+    const cleanEmail = user.email.trim().toLowerCase();
+    const { data: matchedStudents } = await dbClient
       .from('students')
       .select('*')
-      .ilike('email', user.email)
-      .maybeSingle();
+      .ilike('email', cleanEmail)
+      .neq('status', 'graduated');
 
-    if (matchedByEmail) {
-      if (adminClient) {
-        await adminClient
-          .from('students')
-          .update({ user_id: user.id })
-          .eq('id', matchedByEmail.id);
+    if (matchedStudents && matchedStudents.length === 1) {
+      const candidate = matchedStudents[0];
+      if (!candidate.user_id || candidate.user_id === user.id) {
+        if (adminClient && candidate.user_id !== user.id) {
+          await adminClient
+            .from('students')
+            .update({ user_id: user.id })
+            .eq('id', candidate.id);
+        }
+        student = { ...candidate, user_id: user.id };
       }
-      student = matchedByEmail;
     }
   }
 
-  if (!student) {
-    throw new Error('Student Profile Not Found: No student record is linked to your user account.');
+  // 3. Confirm student record exists and is active
+  if (!student || student.status !== 'active') {
+    throw new Error('Forbidden: Only authorized students can access this area.');
+  }
+
+  // 4. Verify and repair profile role in public.profiles using adminClient
+  let { data: profile } = await dbClient
+    .from('profiles')
+    .select('id, role')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  // Preserve existing administrator and teacher account boundaries
+  if (profile?.role === 'admin' || profile?.role === 'teacher') {
+    throw new Error('Forbidden: Only authorized students can access this area.');
+  }
+
+  if (profile?.role !== 'student' && adminClient) {
+    const displayName =
+      [student.first_name, student.last_name]
+        .filter(Boolean)
+        .join(' ') ||
+      user.user_metadata?.full_name ||
+      user.email?.split('@')[0] ||
+      'Student';
+
+    const { error: upsertError } = await adminClient.from('profiles').upsert({
+      id: user.id,
+      display_name: displayName,
+      role: 'student',
+    });
+
+    if (upsertError) {
+      console.error('[CampusOS StudentPortal] Error repairing profile role:', upsertError.message);
+    } else {
+      profile = { id: user.id, role: 'student' };
+    }
+  }
+
+  if (profile?.role !== 'student' && !student) {
+    throw new Error('Forbidden: Only authorized students can access this area.');
   }
 
   return { supabase, user, student: student as Student };
