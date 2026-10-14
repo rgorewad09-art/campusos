@@ -148,6 +148,10 @@ export async function updateSession(request: NextRequest) {
 
     // Role-based destination for login page visits
     if (isLoginPage) {
+      if (request.nextUrl.searchParams.has('error')) {
+        return supabaseResponse;
+      }
+
       const redirectUrl = request.nextUrl.clone();
       if (role === 'student') redirectUrl.pathname = '/student/dashboard';
       else if (role === 'teacher') redirectUrl.pathname = '/teacher/dashboard';

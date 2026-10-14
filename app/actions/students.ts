@@ -273,8 +273,8 @@ export async function enrollStudentAction(
           console.warn('[CampusOS Students] Supabase invitation notice:', inviteError.message);
 
           // In development mode or if email delivery is restricted, generate safe link
-          if (process.env.NODE_ENV !== 'production' || inviteError.message.includes('rate')) {
-            const { data: linkData } = await adminClient.auth.admin.generateLink({
+          if (process.env.NODE_ENV !== 'production' || inviteError.message.includes('rate') || inviteError.message.includes('already')) {
+            let { data: linkData } = await adminClient.auth.admin.generateLink({
               type: 'invite',
               email: cleanEmail,
               options: {
@@ -286,6 +286,14 @@ export async function enrollStudentAction(
                 redirectTo,
               },
             });
+            if (!linkData?.properties) {
+              const { data: recData } = await adminClient.auth.admin.generateLink({
+                type: 'recovery',
+                email: cleanEmail,
+                options: { redirectTo },
+              });
+              linkData = recData;
+            }
             if (linkData?.properties) {
               activationLink = buildActivationLink(origin, linkData.properties);
               if (linkData.user) {
@@ -330,7 +338,7 @@ export async function enrollStudentAction(
 
           // Provide direct activation link for immediate setup and copying
           const { data: devLink } = await adminClient.auth.admin.generateLink({
-            type: 'magiclink',
+            type: 'recovery',
             email: cleanEmail,
             options: { redirectTo },
           });
@@ -561,10 +569,10 @@ export async function resendStudentInviteAction(studentId: string): Promise<{
 
     // Check if the user already exists in auth.users
     if (student.user_id) {
-      // User exists in auth.users -> generate recovery/magiclink for password setup
+      // User exists in auth.users -> generate recovery for password setup
       const { data: linkData, error: linkError } =
         await adminClient.auth.admin.generateLink({
-          type: 'magiclink',
+          type: 'recovery',
           email: cleanEmail,
           options: { redirectTo },
         });
@@ -605,7 +613,7 @@ export async function resendStudentInviteAction(studentId: string): Promise<{
 
         // Provide direct activation link for immediate setup and copying
         const { data: devLink } = await adminClient.auth.admin.generateLink({
-          type: 'magiclink',
+          type: 'recovery',
           email: cleanEmail,
           options: { redirectTo },
         });
@@ -613,8 +621,8 @@ export async function resendStudentInviteAction(studentId: string): Promise<{
           activationLink = buildActivationLink(origin, devLink.properties);
         }
       } else {
-        // Fallback to generateLink
-        const { data: linkData } = await adminClient.auth.admin.generateLink({
+        // Fallback: inviteUserByEmail might fail due to rate limits or existing auth user
+        let { data: linkData } = await adminClient.auth.admin.generateLink({
           type: 'invite',
           email: cleanEmail,
           options: {
@@ -626,6 +634,14 @@ export async function resendStudentInviteAction(studentId: string): Promise<{
             redirectTo,
           },
         });
+        if (!linkData?.properties) {
+          const { data: recData } = await adminClient.auth.admin.generateLink({
+            type: 'recovery',
+            email: cleanEmail,
+            options: { redirectTo },
+          });
+          linkData = recData;
+        }
         if (linkData?.properties) {
           activationLink = buildActivationLink(origin, linkData.properties);
           inviteSent = true;

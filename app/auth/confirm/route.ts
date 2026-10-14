@@ -1,8 +1,11 @@
-import { type EmailOtpType, type User, type SupabaseClient } from '@supabase/supabase-js';
+import { type EmailOtpType, type User } from '@supabase/supabase-js';
 import { type NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/src/lib/supabase/server';
+import { createServerClient } from '@supabase/ssr';
 import { createAdminClient } from '@/src/lib/supabase/admin';
 import { getSafeRedirectUrl } from '@/src/lib/security';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 /**
  * app/auth/confirm/route.ts
@@ -13,8 +16,9 @@ import { getSafeRedirectUrl } from '@/src/lib/security';
  *  2. Token Hash Verification (`?token_hash=...&type=...`) — for direct OTP and email links.
  *
  * When the student clicks their activation email link:
- * 1. This endpoint exchanges the code or verifies the token, setting session cookies.
- * 2. It links the student's `public.students.user_id` to their auth account.
+ * 1. This endpoint exchanges the code or verifies the token, writing session cookies directly
+ *    to the redirect response to ensure mobile browsers and cross-device links preserve the session.
+ * 2. It links the student's `public.students.user_id` and prepares `public.profiles`.
  * 3. Redirects the student to `/activate/password` to create their password.
  */
 export async function GET(request: NextRequest) {
@@ -25,14 +29,40 @@ export async function GET(request: NextRequest) {
   const rawNext = searchParams.get('next') || '/activate/password';
   const next = getSafeRedirectUrl(rawNext);
 
-  const supabase = await createClient();
+  const redirectUrl = request.nextUrl.clone();
+  redirectUrl.pathname = next;
+  redirectUrl.search = '';
+
+  // Prepare redirect response so session cookies are written directly to Set-Cookie headers
+  let response = NextResponse.redirect(redirectUrl);
+
+  if (!supabaseUrl || !supabasePublishableKey) {
+    const errorRedirect = request.nextUrl.clone();
+    errorRedirect.pathname = '/student/login';
+    errorRedirect.searchParams.set('error', 'activation_link_invalid');
+    return NextResponse.redirect(errorRedirect);
+  }
+
+  const supabase = createServerClient(supabaseUrl, supabasePublishableKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options);
+        });
+      },
+    },
+  });
 
   // 1. Handle PKCE Code Exchange (standard Supabase redirect flow)
   if (code) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error && data?.user) {
-      return await linkStudentAndRedirect(data.user, supabase, next, request);
+      await linkStudentAndRepairProfile(data.user);
+      return response;
     }
 
     console.error('[CampusOS Auth] exchangeCodeForSession failed:', error?.message);
@@ -46,7 +76,8 @@ export async function GET(request: NextRequest) {
     });
 
     if (!error && data?.user) {
-      return await linkStudentAndRedirect(data.user, supabase, next, request);
+      await linkStudentAndRepairProfile(data.user);
+      return response;
     }
 
     console.error('[CampusOS Auth] verifyOtp failed:', error?.message);
@@ -54,56 +85,45 @@ export async function GET(request: NextRequest) {
 
   // Fallback: Token or code invalid, expired, or missing
   const errorRedirect = request.nextUrl.clone();
-  errorRedirect.pathname = '/login';
+  errorRedirect.pathname = '/student/login';
   errorRedirect.searchParams.set('error', 'activation_link_invalid');
   return NextResponse.redirect(errorRedirect);
 }
 
 /**
- * Links public.students.user_id if not yet associated, and redirects to password setup.
+ * Links public.students.user_id if not yet associated, and ensures profile is initialized.
  */
-async function linkStudentAndRedirect(
-  user: User,
-  supabase: SupabaseClient,
-  next: string,
-  request: NextRequest
-) {
+async function linkStudentAndRepairProfile(user: User) {
   const adminClient = createAdminClient();
-  const dbClient = adminClient || supabase;
+  if (!adminClient || !user.email) return;
 
-  const { data: profile } = await dbClient
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
+  const cleanEmail = user.email.trim().toLowerCase();
+
+  const { data: student } = await adminClient
+    .from('students')
+    .select('id, user_id, first_name, last_name')
+    .ilike('email', cleanEmail)
+    .neq('status', 'graduated')
     .maybeSingle();
 
-  // If role is student (or indicated in metadata), link student record to auth user
-  if (profile?.role === 'student' || user.user_metadata?.role === 'student') {
-    const studentEmail = user.email?.toLowerCase();
-    if (studentEmail) {
-      await dbClient
+  if (student) {
+    if (!student.user_id) {
+      await adminClient
         .from('students')
         .update({ user_id: user.id })
-        .ilike('email', studentEmail)
-        .is('user_id', null);
+        .eq('id', student.id);
     }
 
-    // Self-heal profile if missing
-    if (!profile && adminClient) {
-      const studentName =
-        user.user_metadata?.full_name ||
-        user.email?.split('@')[0] ||
-        'Student';
-      await adminClient.from('profiles').upsert({
-        id: user.id,
-        display_name: studentName,
-        role: 'student',
-      });
-    }
+    const studentName =
+      [student.first_name, student.last_name].filter(Boolean).join(' ') ||
+      user.user_metadata?.full_name ||
+      user.email?.split('@')[0] ||
+      'Student';
+
+    await adminClient.from('profiles').upsert({
+      id: user.id,
+      display_name: studentName,
+      role: 'student',
+    });
   }
-
-  const redirectUrl = request.nextUrl.clone();
-  redirectUrl.pathname = next;
-  redirectUrl.search = '';
-  return NextResponse.redirect(redirectUrl);
 }
