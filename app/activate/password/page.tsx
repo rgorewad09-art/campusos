@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Lock, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { setupPasswordAction } from '@/app/actions/auth';
 
-export default function StudentPasswordSetupPage() {
+export default function PasswordSetupPage() {
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -51,7 +51,7 @@ export default function StudentPasswordSetupPage() {
               Create Your Password
             </h1>
             <p className="mt-1 text-xs text-[#737373] leading-relaxed">
-              Your email has been verified. Set a secure password to activate your personal student portal account.
+              Your email has been verified. Set a secure password to activate your personal portal account.
             </p>
           </div>
 
@@ -65,7 +65,7 @@ export default function StudentPasswordSetupPage() {
               <div>
                 <p className="font-semibold">Password established successfully!</p>
                 <p className="text-[11px] text-[#737373] mt-0.5">
-                  Redirecting to your student dashboard...
+                  Redirecting to your dashboard...
                 </p>
               </div>
             </div>
@@ -163,7 +163,7 @@ export default function StudentPasswordSetupPage() {
         </div>
 
         <p className="mt-6 text-center text-[11px] text-[#A3A3A3]">
-          CampusOS &bull; Student Account Activation
+          CampusOS &bull; Portal Account Activation
         </p>
       </div>
     </div>

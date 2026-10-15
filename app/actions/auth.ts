@@ -2,7 +2,12 @@
 
 import { createClient } from '@/src/lib/supabase/server';
 import { createAdminClient } from '@/src/lib/supabase/admin';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import {
+  CAMPUSOS_ACTIVITY_COOKIE,
+  CAMPUSOS_REMEMBER_COOKIE,
+} from '@/src/lib/session';
 
 export interface AuthActionState {
   error?: string;
@@ -54,20 +59,61 @@ export async function loginAction(
       return { error: 'Invalid credentials or identifier.' };
     }
 
-    const { data: student, error: studentError } = await adminClient
-      .from('students')
-      .select('email, status')
-      .ilike('student_code', cleanCode)
-      .maybeSingle();
+    // 2. College ID or Teacher ID login (e.g. STU-2026-0001 or TCH-2026-0001)
+    let resolvedEmail: string | null = null;
 
-    if (studentError || !student || !student.email || student.status === 'graduated') {
+    if (cleanCode.toUpperCase().startsWith('TCH')) {
+      const { data: teacher } = await adminClient
+        .from('teachers')
+        .select('email, status')
+        .ilike('teacher_code', cleanCode)
+        .maybeSingle();
+
+      if (teacher && teacher.email && teacher.status !== 'suspended') {
+        resolvedEmail = teacher.email;
+      }
+    } else {
+      const { data: student } = await adminClient
+        .from('students')
+        .select('email, status')
+        .ilike('student_code', cleanCode)
+        .maybeSingle();
+
+      if (student && student.email && student.status !== 'graduated') {
+        resolvedEmail = student.email;
+      } else {
+        // Fallback: Check teachers table if code didn't match student
+        const { data: teacher } = await adminClient
+          .from('teachers')
+          .select('email, status')
+          .ilike('teacher_code', cleanCode)
+          .maybeSingle();
+
+        if (teacher && teacher.email && teacher.status !== 'suspended') {
+          resolvedEmail = teacher.email;
+        }
+      }
+    }
+
+    if (!resolvedEmail) {
       return { error: 'Invalid credentials or identifier.' };
     }
 
-    emailToAuthenticate = student.email.toLowerCase();
+    emailToAuthenticate = resolvedEmail.toLowerCase();
   }
 
   const supabase = await createClient();
+
+  // Safely clear any existing session in this browser before signing in with new credentials.
+  // Using scope: 'local' ensures sessions on other devices are not revoked.
+  try {
+    const { data: existingSessionData } = await supabase.auth.getSession();
+    if (existingSessionData?.session) {
+      await supabase.auth.signOut({ scope: 'local' });
+    }
+  } catch {
+    // Ignore error if no prior session existed
+  }
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email: emailToAuthenticate,
@@ -88,12 +134,13 @@ export async function loginAction(
     .eq('id', data.user.id)
     .maybeSingle();
 
-  // Self-heal: If profile row is missing, check if this verified auth account is an enrolled student
+  // Self-heal: If profile row is missing, check if verified auth account is student or teacher
   if ((!profile || !profile.role) && data.user.email && adminClient) {
+    const cleanEmail = data.user.email.trim().toLowerCase();
     const { data: enrolledStudent } = await adminClient
       .from('students')
       .select('id, user_id, first_name, last_name, status')
-      .ilike('email', data.user.email.trim())
+      .ilike('email', cleanEmail)
       .neq('status', 'graduated')
       .maybeSingle();
 
@@ -118,6 +165,36 @@ export async function loginAction(
 
       profile = { id: data.user.id, role: 'student' };
       profileError = null;
+    } else {
+      // Check teachers table
+      const { data: teacher } = await adminClient
+        .from('teachers')
+        .select('id, user_id, first_name, last_name, status')
+        .ilike('email', cleanEmail)
+        .neq('status', 'suspended')
+        .maybeSingle();
+
+      if (teacher) {
+        if (!teacher.user_id) {
+          await adminClient
+            .from('teachers')
+            .update({ user_id: data.user.id })
+            .eq('id', teacher.id);
+        }
+
+        const displayName =
+          [teacher.first_name, teacher.last_name].filter(Boolean).join(' ') ||
+          'Teacher';
+
+        await adminClient.from('profiles').upsert({
+          id: data.user.id,
+          display_name: displayName,
+          role: 'teacher',
+        });
+
+        profile = { id: data.user.id, role: 'teacher' };
+        profileError = null;
+      }
     }
   }
 
@@ -125,7 +202,7 @@ export async function loginAction(
   const userRole = profile?.role;
 
   if (profileError || !userRole || !allowedRoles.includes(userRole)) {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: 'local' });
     return {
       error: 'Access denied: Your account is not assigned an active role in CampusOS.',
     };
@@ -137,6 +214,29 @@ export async function loginAction(
   } else if (userRole === 'teacher') {
     destination = '/teacher/dashboard';
   }
+
+  const rememberMe =
+    formData.get('remember_me') === 'on' ||
+    formData.get('remember_me') === 'true';
+
+  const cookieStore = await cookies();
+  const now = Date.now().toString();
+  const baseCookieOptions = {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: process.env.NODE_ENV === 'production',
+  };
+
+  cookieStore.set(CAMPUSOS_ACTIVITY_COOKIE, now, {
+    ...baseCookieOptions,
+    ...(rememberMe ? { maxAge: 30 * 24 * 60 * 60 } : {}),
+  });
+
+  cookieStore.set(CAMPUSOS_REMEMBER_COOKIE, rememberMe ? '1' : '0', {
+    ...baseCookieOptions,
+    ...(rememberMe ? { maxAge: 30 * 24 * 60 * 60 } : {}),
+  });
 
   return { success: true, role: userRole, destination };
 }
@@ -189,12 +289,13 @@ export async function setupPasswordAction(
     .eq('id', user.id)
     .maybeSingle();
 
-  // Self-heal: If profile row is missing, check if this verified auth account is an enrolled student
+  // Self-heal: If profile row is missing, check if verified auth account is student or teacher
   if ((!profile || !profile.role) && user.email && adminClient) {
+    const cleanEmail = user.email.trim().toLowerCase();
     const { data: enrolledStudent } = await adminClient
       .from('students')
       .select('id, user_id, first_name, last_name, status')
-      .ilike('email', user.email.trim())
+      .ilike('email', cleanEmail)
       .neq('status', 'graduated')
       .maybeSingle();
 
@@ -218,6 +319,35 @@ export async function setupPasswordAction(
       });
 
       profile = { role: 'student' };
+    } else {
+      // Check teachers table
+      const { data: teacher } = await adminClient
+        .from('teachers')
+        .select('id, user_id, first_name, last_name, status')
+        .ilike('email', cleanEmail)
+        .neq('status', 'suspended')
+        .maybeSingle();
+
+      if (teacher) {
+        if (!teacher.user_id) {
+          await adminClient
+            .from('teachers')
+            .update({ user_id: user.id })
+            .eq('id', teacher.id);
+        }
+
+        const displayName =
+          [teacher.first_name, teacher.last_name].filter(Boolean).join(' ') ||
+          'Teacher';
+
+        await adminClient.from('profiles').upsert({
+          id: user.id,
+          display_name: displayName,
+          role: 'teacher',
+        });
+
+        profile = { role: 'teacher' };
+      }
     }
   }
 
@@ -237,15 +367,67 @@ export async function setupPasswordAction(
       ? '/teacher/dashboard'
       : '/';
 
+  const cookieStore = await cookies();
+  cookieStore.set(CAMPUSOS_ACTIVITY_COOKIE, Date.now().toString(), {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
+
   return { success: true, role, destination };
 }
 
 /**
- * Signs out the authenticated user, revokes session cookies,
- * and redirects to /login.
+ * Signs out the authenticated user locally on this device/browser,
+ * invalidates session cookies across all browser tabs, and redirects to login.
  */
-export async function logoutAction() {
+export async function logoutAction(customRedirect?: string) {
+  const cookieStore = await cookies();
   const supabase = await createClient();
-  await supabase.auth.signOut();
-  redirect('/login');
+
+  try {
+    await supabase.auth.signOut({ scope: 'local' });
+  } catch (err) {
+    console.error('[CampusOS Auth] Supabase signOut error:', err);
+  }
+
+  // Clear all auth and session cookies
+  const allCookies = cookieStore.getAll();
+  allCookies.forEach((cookie) => {
+    if (cookie.name.startsWith('sb-') || cookie.name.startsWith('campusos_')) {
+      cookieStore.delete(cookie.name);
+    }
+  });
+
+  redirect(customRedirect || '/login?error=logged_out');
+}
+
+/**
+ * Refreshes the server-side idle session timestamp when the user explicitly extends their session.
+ */
+export async function refreshSessionAction(): Promise<{ success: boolean; error?: string }> {
+  const cookieStore = await cookies();
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    return { success: false, error: 'Unauthorized: Session not found.' };
+  }
+
+  const isRemembered = cookieStore.get(CAMPUSOS_REMEMBER_COOKIE)?.value === '1';
+  const now = Date.now().toString();
+
+  cookieStore.set(CAMPUSOS_ACTIVITY_COOKIE, now, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    ...(isRemembered ? { maxAge: 30 * 24 * 60 * 60 } : {}),
+  });
+
+  return { success: true };
 }

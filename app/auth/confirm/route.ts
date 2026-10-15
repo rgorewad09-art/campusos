@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createAdminClient } from '@/src/lib/supabase/admin';
 import { getSafeRedirectUrl } from '@/src/lib/security';
+import { CAMPUSOS_ACTIVITY_COOKIE } from '@/src/lib/session';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -26,6 +27,7 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code');
   const token_hash = searchParams.get('token_hash') || searchParams.get('token');
   const type = searchParams.get('type') as EmailOtpType | null;
+  const roleParam = searchParams.get('role');
   const rawNext = searchParams.get('next') || '/activate/password';
   const next = getSafeRedirectUrl(rawNext);
 
@@ -37,10 +39,7 @@ export async function GET(request: NextRequest) {
   let response = NextResponse.redirect(redirectUrl);
 
   if (!supabaseUrl || !supabasePublishableKey) {
-    const errorRedirect = request.nextUrl.clone();
-    errorRedirect.pathname = '/student/login';
-    errorRedirect.searchParams.set('error', 'activation_link_invalid');
-    return NextResponse.redirect(errorRedirect);
+    return createErrorRedirect(request, roleParam, rawNext);
   }
 
   const supabase = createServerClient(supabaseUrl, supabasePublishableKey, {
@@ -61,7 +60,13 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error && data?.user) {
-      await linkStudentAndRepairProfile(data.user);
+      await linkUserAndRepairProfile(data.user, roleParam);
+      response.cookies.set(CAMPUSOS_ACTIVITY_COOKIE, Date.now().toString(), {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+      });
       return response;
     }
 
@@ -76,7 +81,13 @@ export async function GET(request: NextRequest) {
     });
 
     if (!error && data?.user) {
-      await linkStudentAndRepairProfile(data.user);
+      await linkUserAndRepairProfile(data.user, roleParam);
+      response.cookies.set(CAMPUSOS_ACTIVITY_COOKIE, Date.now().toString(), {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+      });
       return response;
     }
 
@@ -84,21 +95,66 @@ export async function GET(request: NextRequest) {
   }
 
   // Fallback: Token or code invalid, expired, or missing
+  return createErrorRedirect(request, roleParam, rawNext);
+}
+
+function createErrorRedirect(request: NextRequest, roleParam: string | null, rawNext: string) {
   const errorRedirect = request.nextUrl.clone();
-  errorRedirect.pathname = '/student/login';
+  if (roleParam === 'teacher' || rawNext.includes('/teacher')) {
+    errorRedirect.pathname = '/teacher/login';
+  } else {
+    errorRedirect.pathname = '/student/login';
+  }
   errorRedirect.searchParams.set('error', 'activation_link_invalid');
   return NextResponse.redirect(errorRedirect);
 }
 
 /**
- * Links public.students.user_id if not yet associated, and ensures profile is initialized.
+ * Links student or teacher account to public.students or public.teachers,
+ * and ensures public.profiles has the correct role and display name.
  */
-async function linkStudentAndRepairProfile(user: User) {
+async function linkUserAndRepairProfile(user: User, roleHint?: string | null) {
   const adminClient = createAdminClient();
   if (!adminClient || !user.email) return;
 
   const cleanEmail = user.email.trim().toLowerCase();
 
+  // If roleHint or user metadata explicitly indicates teacher, check teachers first
+  const isHintTeacher =
+    roleHint === 'teacher' ||
+    user.user_metadata?.role === 'teacher';
+
+  if (isHintTeacher) {
+    const { data: teacher } = await adminClient
+      .from('teachers')
+      .select('id, user_id, first_name, last_name')
+      .ilike('email', cleanEmail)
+      .neq('status', 'suspended')
+      .maybeSingle();
+
+    if (teacher) {
+      if (!teacher.user_id) {
+        await adminClient
+          .from('teachers')
+          .update({ user_id: user.id })
+          .eq('id', teacher.id);
+      }
+
+      const teacherName =
+        [teacher.first_name, teacher.last_name].filter(Boolean).join(' ') ||
+        user.user_metadata?.full_name ||
+        'Faculty Member';
+
+      await adminClient.from('profiles').upsert({
+        id: user.id,
+        display_name: teacherName,
+        role: 'teacher',
+      });
+      return;
+    }
+  }
+
+  // Check students table
   const { data: student } = await adminClient
     .from('students')
     .select('id, user_id, first_name, last_name')
@@ -124,6 +180,53 @@ async function linkStudentAndRepairProfile(user: User) {
       id: user.id,
       display_name: studentName,
       role: 'student',
+    });
+    return;
+  }
+
+  // Check teachers table if not checked above
+  if (!isHintTeacher) {
+    const { data: teacher } = await adminClient
+      .from('teachers')
+      .select('id, user_id, first_name, last_name')
+      .ilike('email', cleanEmail)
+      .neq('status', 'suspended')
+      .maybeSingle();
+
+    if (teacher) {
+      if (!teacher.user_id) {
+        await adminClient
+          .from('teachers')
+          .update({ user_id: user.id })
+          .eq('id', teacher.id);
+      }
+
+      const teacherName =
+        [teacher.first_name, teacher.last_name].filter(Boolean).join(' ') ||
+        user.user_metadata?.full_name ||
+        'Faculty Member';
+
+      await adminClient.from('profiles').upsert({
+        id: user.id,
+        display_name: teacherName,
+        role: 'teacher',
+      });
+      return;
+    }
+  }
+
+  // Fallback to metadata role if provided
+  const metaRole = user.user_metadata?.role || (roleHint === 'teacher' ? 'teacher' : undefined);
+  if (metaRole === 'teacher' || metaRole === 'student') {
+    const displayName =
+      user.user_metadata?.full_name ||
+      user.email?.split('@')[0] ||
+      (metaRole === 'teacher' ? 'Faculty Member' : 'Student');
+
+    await adminClient.from('profiles').upsert({
+      id: user.id,
+      display_name: displayName,
+      role: metaRole,
     });
   }
 }

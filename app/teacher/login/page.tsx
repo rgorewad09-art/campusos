@@ -16,6 +16,10 @@ function TeacherLoginForm() {
   const [errorMessage, setErrorMessage] = useState<string | null>(
     urlError === 'unauthorized'
       ? 'Access denied: Please sign in with an authorized faculty account.'
+      : urlError === 'session_expired'
+      ? 'Your session has expired due to 15 minutes of inactivity. Please sign in again.'
+      : urlError === 'logged_out'
+      ? 'You have been safely signed out.'
       : null
   );
   const [isPending, startTransition] = useTransition();
@@ -82,15 +86,15 @@ function TeacherLoginForm() {
               htmlFor="identifier"
               className="block text-xs font-medium text-[#171717] mb-1.5"
             >
-              Faculty Email address
+              Faculty Email or Teacher ID
             </label>
             <input
               id="identifier"
               name="identifier"
-              type="email"
+              type="text"
               autoComplete="username"
               required
-              placeholder="faculty@campusos.com"
+              placeholder="faculty@campusos.com or TCH-2026-0001"
               disabled={isPending}
               className="w-full rounded-md border border-[#E5E5E5] bg-white px-3 py-2 text-sm text-[#171717] placeholder:text-[#A3A3A3] focus:border-[#171717] focus:outline-none transition-colors disabled:bg-[#FAFAFA] disabled:cursor-not-allowed"
             />
@@ -113,6 +117,23 @@ function TeacherLoginForm() {
               disabled={isPending}
               className="w-full rounded-md border border-[#E5E5E5] bg-white px-3 py-2 text-sm text-[#171717] placeholder:text-[#A3A3A3] focus:border-[#171717] focus:outline-none transition-colors disabled:bg-[#FAFAFA] disabled:cursor-not-allowed"
             />
+          </div>
+
+          <div className="flex items-center text-xs">
+            <label
+              htmlFor="remember_me"
+              className="flex items-center gap-2 cursor-pointer select-none text-[#737373] hover:text-[#171717]"
+            >
+              <input
+                id="remember_me"
+                name="remember_me"
+                type="checkbox"
+                defaultChecked={false}
+                disabled={isPending}
+                className="h-3.5 w-3.5 rounded border-[#E5E5E5] text-[#171717] focus:ring-0 focus:outline-none accent-[#171717]"
+              />
+              <span>Remember me on this device</span>
+            </label>
           </div>
 
           <button

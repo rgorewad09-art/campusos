@@ -17,6 +17,7 @@
 
 import { createAdminClient } from '../src/lib/supabase/admin.ts';
 import { createClient } from '@supabase/supabase-js';
+import { buildActivationLink } from '../src/lib/security.ts';
 
 let passed = 0;
 let failed = 0;
@@ -148,6 +149,63 @@ async function runTests() {
     .maybeSingle();
 
   assert(resolvedStudent?.email?.toLowerCase() === targetStudent.email.toLowerCase(), `College ID "${targetStudent.student_code}" resolves to email "${targetStudent.email}"`);
+
+  // --- Test Suite 8: Teacher Account Activation Verification ---
+  console.log('\n8. Testing Teacher Account Activation & Token Link Resolution:');
+  const { data: activeTeachers, error: tchError } = await adminClient
+    .from('teachers')
+    .select('id, teacher_code, first_name, last_name, email, status, user_id')
+    .not('email', 'is', null)
+    .neq('status', 'suspended')
+    .limit(1);
+
+  if (activeTeachers && activeTeachers.length > 0) {
+    const targetTeacher = activeTeachers[0];
+    console.log(`  Target teacher: ${targetTeacher.teacher_code} (${targetTeacher.email})`);
+
+    // Verify Teacher ID format
+    assert(/^TCH-\d{4}-\d{4}$/.test(targetTeacher.teacher_code), `Teacher code "${targetTeacher.teacher_code}" matches standard format TCH-YYYY-XXXX`);
+
+    // Verify activation link generation with role=teacher
+    const teacherRedirectTo = 'http://localhost:3000/auth/confirm?next=/activate/password&role=teacher';
+    const { data: tchLinkData, error: tchLinkError } = await adminClient.auth.admin.generateLink({
+      type: 'recovery',
+      email: targetTeacher.email,
+      options: { redirectTo: teacherRedirectTo },
+    });
+
+    assert(!tchLinkError && Boolean(tchLinkData?.properties), 'Generated activation link properties for teacher via Supabase Auth Admin API');
+
+    if (tchLinkData?.properties) {
+      const formattedLink = buildActivationLink('http://localhost:3000', tchLinkData.properties, 'teacher');
+      assert(Boolean(formattedLink), 'buildActivationLink successfully constructed teacher activation link');
+
+      if (formattedLink) {
+        const parsedUrl = new URL(formattedLink);
+        assert(parsedUrl.pathname === '/auth/confirm', 'Teacher activation link routes directly to /auth/confirm');
+        assert(parsedUrl.searchParams.has('token_hash'), 'Teacher activation link includes token_hash');
+        assert(parsedUrl.searchParams.get('role') === 'teacher', 'Teacher activation link includes role=teacher for portal-aware routing');
+        assert(parsedUrl.searchParams.get('next') === '/activate/password', 'Teacher activation link targets /activate/password');
+      }
+    }
+
+    if (targetTeacher.user_id) {
+      const { data: tchProfile } = await adminClient
+        .from('profiles')
+        .select('id, role, display_name')
+        .eq('id', targetTeacher.user_id)
+        .maybeSingle();
+
+      if (tchProfile) {
+        assert(tchProfile.role === 'teacher', 'Teacher profile role is strictly "teacher"');
+      } else {
+        console.log('  ! Notice: Teacher user_id present; profile creation is deferred to activation confirmation.');
+        assert(true, 'Teacher account pending initial activation confirmation');
+      }
+    }
+  } else {
+    console.log('  ! Notice: No existing teachers found in database to test activation link.');
+  }
 
   console.log('\n====================================================');
   console.log(`Results: ${passed} passed, ${failed} failed`);

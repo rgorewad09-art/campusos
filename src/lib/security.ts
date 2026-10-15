@@ -232,7 +232,8 @@ export function buildActivationLink(
     hashed_token?: string;
     action_link?: string;
     verification_type?: string;
-  } | null
+  } | null,
+  role?: string
 ): string | undefined {
   if (!properties) return undefined;
   const base = normalizeOrigin(origin);
@@ -246,6 +247,9 @@ export function buildActivationLink(
       type,
       next: '/activate/password',
     });
+    if (role) {
+      params.set('role', role);
+    }
     return `${base}/auth/confirm?${params.toString()}`;
   }
 
@@ -253,7 +257,13 @@ export function buildActivationLink(
   if (properties.action_link) {
     try {
       const parsed = new URL(properties.action_link);
-      parsed.searchParams.set('redirect_to', `${base}/auth/confirm?next=/activate/password`);
+      const redirectParams = new URLSearchParams({
+        next: '/activate/password',
+      });
+      if (role) {
+        redirectParams.set('role', role);
+      }
+      parsed.searchParams.set('redirect_to', `${base}/auth/confirm?${redirectParams.toString()}`);
       return parsed.toString();
     } catch {
       return properties.action_link;

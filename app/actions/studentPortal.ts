@@ -14,6 +14,13 @@ import {
 } from '@/src/types/document';
 import type { StudentGuardianLink } from '@/src/types/guardian';
 
+import type {
+  Course,
+  StudentAcademicEnrollment,
+  StudentSelectedSubject,
+  TimetableEntry,
+} from '@/src/types/academic';
+
 export interface StudentDashboardData {
   student: Student;
   attendance: {
@@ -26,6 +33,12 @@ export interface StudentDashboardData {
   };
   documents: StudentDocument[];
   guardians: StudentGuardianLink[];
+  academic?: {
+    enrollment?: StudentAcademicEnrollment;
+    selectedSubjects?: StudentSelectedSubject[];
+    personalTimetable?: TimetableEntry[];
+    availableCourses?: (Course & { curriculum?: any[] })[];
+  };
 }
 
 /**
@@ -187,6 +200,83 @@ export async function getStudentDashboardDataAction(): Promise<{
       console.error('[CampusOS Student Portal] Guardians fetch error:', guardError);
     }
 
+    // 4. Academic enrollment and subjects
+    let academicData: StudentDashboardData['academic'] = undefined;
+    try {
+      const adminClient = createAdminClient();
+      const dbClient = adminClient || supabase;
+
+      const { data: enrollment } = await dbClient
+        .from('student_academic_enrollments')
+        .select(`
+          *,
+          course:courses(*)
+        `)
+        .eq('student_id', student.id)
+        .order('enrolled_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      let selectedSubjects: StudentSelectedSubject[] = [];
+      let personalTimetable: TimetableEntry[] = [];
+
+      if (enrollment) {
+        const { data: subs } = await dbClient
+          .from('student_selected_subjects')
+          .select(`
+            *,
+            subject:subjects(*)
+          `)
+          .eq('enrollment_id', enrollment.id);
+
+        if (subs) selectedSubjects = subs as StudentSelectedSubject[];
+
+        if (enrollment.status === 'approved') {
+          const { data: tt } = await dbClient
+            .from('timetables')
+            .select(`
+              *,
+              course:courses(*),
+              subject:subjects(*),
+              teacher:teachers(*)
+            `)
+            .eq('course_id', enrollment.course_id)
+            .eq('semester', enrollment.semester)
+            .eq('section', enrollment.section)
+            .eq('academic_term', enrollment.academic_term)
+            .eq('status', 'approved')
+            .order('day_of_week', { ascending: true })
+            .order('start_time', { ascending: true });
+
+          if (tt) personalTimetable = tt as TimetableEntry[];
+        }
+      }
+
+      // If not enrolled or pending, also fetch available courses & curriculum for onboarding
+      let availableCourses: any[] = [];
+      const { data: cList } = await dbClient
+        .from('courses')
+        .select(`
+          *,
+          course_subjects(
+            *,
+            subject:subjects(*)
+          )
+        `)
+        .eq('status', 'active');
+
+      if (cList) availableCourses = cList;
+
+      academicData = {
+        enrollment: enrollment as StudentAcademicEnrollment | undefined,
+        selectedSubjects,
+        personalTimetable,
+        availableCourses,
+      };
+    } catch {
+      // Academic tables may not yet be initialized in Supabase
+    }
+
     return {
       success: true,
       data: {
@@ -201,6 +291,7 @@ export async function getStudentDashboardDataAction(): Promise<{
         },
         documents: (documentRows as StudentDocument[]) || [],
         guardians: (guardianRows as unknown as StudentGuardianLink[]) || [],
+        academic: academicData,
       },
     };
   } catch (err: unknown) {

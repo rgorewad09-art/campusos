@@ -1,7 +1,10 @@
 import AppShell from '../../components/AppShell';
 import PlaceholderPage from '../../components/PlaceholderPage';
+import { requireServerAuth } from '@/src/lib/auth-guard';
 
-export default function VerifyDocumentsPage() {
+export default async function VerifyDocumentsPage() {
+  await requireServerAuth(['admin']);
+
   return (
     <AppShell pageTitle="Verify Documents">
       <PlaceholderPage

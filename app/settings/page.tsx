@@ -1,7 +1,10 @@
 import AppShell from '../components/AppShell';
 import PlaceholderPage from '../components/PlaceholderPage';
+import { requireServerAuth } from '@/src/lib/auth-guard';
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  await requireServerAuth(['admin']);
+
   return (
     <AppShell pageTitle="Settings">
       <PlaceholderPage

@@ -23,6 +23,11 @@ import {
   Calendar,
   UploadCloud,
   X,
+  BookOpen,
+  GraduationCap,
+  CalendarDays,
+  Layers,
+  MapPin,
 } from 'lucide-react';
 import { logoutAction } from '@/app/actions/auth';
 import {
@@ -30,8 +35,11 @@ import {
   getStudentDocumentSignedUrlAction,
   type StudentDashboardData,
 } from '@/app/actions/studentPortal';
+import { submitStudentEnrollmentAction } from '@/app/actions/academic';
+import { DAYS_OF_WEEK } from '@/src/types/academic';
 import { DOCUMENT_CATEGORIES, type StudentDocument } from '@/src/types/document';
 import StudentUploadModal from './components/StudentUploadModal';
+import SessionTimeoutWarning from '@/app/components/SessionTimeoutWarning';
 
 const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
   DOCUMENT_CATEGORIES.map((c) => [c.value, c.label])
@@ -44,10 +52,17 @@ export default function StudentDashboardPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'attendance' | 'documents' | 'profile'>('attendance');
+  const [activeTab, setActiveTab] = useState<'academics' | 'timetable' | 'attendance' | 'documents' | 'profile'>('academics');
   const [viewingDocId, setViewingDocId] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+
+  // Academic Onboarding State
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [selectedSemester, setSelectedSemester] = useState(1);
+  const [selectedElectives, setSelectedElectives] = useState<string[]>([]);
+  const [isOnboardingSubmitting, setIsOnboardingSubmitting] = useState(false);
+  const [onboardingError, setOnboardingError] = useState<string | null>(null);
 
   const fetchData = useCallback(async (isSilent = false) => {
     if (!isSilent) setIsLoading(true);
@@ -59,6 +74,9 @@ export default function StudentDashboardPage() {
         setError(res.error || 'Failed to load student data.');
       } else {
         setData(res.data);
+        if (res.data.academic?.availableCourses && res.data.academic.availableCourses.length > 0) {
+          setSelectedCourseId((prev) => prev || res.data!.academic!.availableCourses![0].id);
+        }
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error loading dashboard.');
@@ -67,6 +85,33 @@ export default function StudentDashboardPage() {
       setIsRefreshing(false);
     }
   }, []);
+
+  async function handleSubmitOnboarding(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedCourseId) return;
+
+    setIsOnboardingSubmitting(true);
+    setOnboardingError(null);
+
+    try {
+      const res = await submitStudentEnrollmentAction({
+        course_id: selectedCourseId,
+        semester: Number(selectedSemester),
+        elective_subject_ids: selectedElectives,
+      });
+
+      if (!res.success) {
+        setOnboardingError(res.error || 'Failed to submit enrollment choices.');
+      } else {
+        setSuccessBanner('Academic enrollment choices submitted for administrator review.');
+        fetchData(true);
+      }
+    } catch (err: unknown) {
+      setOnboardingError(err instanceof Error ? err.message : 'Error submitting enrollment.');
+    } finally {
+      setIsOnboardingSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     fetchData();
@@ -105,7 +150,17 @@ export default function StudentDashboardPage() {
   }
 
   async function handleSignOut() {
-    await logoutAction();
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        const channel = new BroadcastChannel('campusos_session_sync');
+        channel.postMessage({ type: 'LOGOUT', timestamp: Date.now() });
+        channel.close();
+      }
+      localStorage.setItem('campusos_tab_logout', String(Date.now()));
+    } catch {
+      // Fallback
+    }
+    await logoutAction('/student/login?error=logged_out');
   }
 
   if (isLoading) {
@@ -156,6 +211,7 @@ export default function StudentDashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#F7F7F7]">
+      <SessionTimeoutWarning />
       {/* Top Header */}
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#E5E5E5] bg-white px-6">
         <div className="flex items-center gap-3">
@@ -314,10 +370,32 @@ export default function StudentDashboardPage() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="mb-6 flex border-b border-[#E5E5E5]">
+        <div className="mb-6 flex border-b border-[#E5E5E5] overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('academics')}
+            className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold whitespace-nowrap transition-colors ${
+              activeTab === 'academics'
+                ? 'border-[#171717] text-[#171717]'
+                : 'border-transparent text-[#737373] hover:text-[#171717]'
+            }`}
+          >
+            <BookOpen size={14} />
+            <span>Academic Profile & Curriculum</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('timetable')}
+            className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold whitespace-nowrap transition-colors ${
+              activeTab === 'timetable'
+                ? 'border-[#171717] text-[#171717]'
+                : 'border-transparent text-[#737373] hover:text-[#171717]'
+            }`}
+          >
+            <CalendarDays size={14} />
+            <span>My Timetable</span>
+          </button>
           <button
             onClick={() => setActiveTab('attendance')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold transition-colors ${
+            className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold whitespace-nowrap transition-colors ${
               activeTab === 'attendance'
                 ? 'border-[#171717] text-[#171717]'
                 : 'border-transparent text-[#737373] hover:text-[#171717]'
@@ -328,7 +406,7 @@ export default function StudentDashboardPage() {
           </button>
           <button
             onClick={() => setActiveTab('documents')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold transition-colors ${
+            className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold whitespace-nowrap transition-colors ${
               activeTab === 'documents'
                 ? 'border-[#171717] text-[#171717]'
                 : 'border-transparent text-[#737373] hover:text-[#171717]'
@@ -339,7 +417,7 @@ export default function StudentDashboardPage() {
           </button>
           <button
             onClick={() => setActiveTab('profile')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold transition-colors ${
+            className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold whitespace-nowrap transition-colors ${
               activeTab === 'profile'
                 ? 'border-[#171717] text-[#171717]'
                 : 'border-transparent text-[#737373] hover:text-[#171717]'
@@ -349,6 +427,333 @@ export default function StudentDashboardPage() {
             <span>Personal Record</span>
           </button>
         </div>
+
+        {/* Tab: Academic Profile & Curriculum */}
+        {activeTab === 'academics' && (
+          <div className="space-y-6">
+            {data?.academic?.enrollment ? (
+              <div className="rounded-xl border border-[#E5E5E5] bg-white p-6 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[#E5E5E5] pb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <GraduationCap size={18} className="text-[#171717]" />
+                      <h3 className="text-base font-bold text-[#171717]">
+                        {data.academic.enrollment.course?.code} - {data.academic.enrollment.course?.name}
+                      </h3>
+                    </div>
+                    <p className="text-xs text-[#737373] mt-1">
+                      Semester {data.academic.enrollment.semester} &bull; Section {data.academic.enrollment.section} &bull; Academic Term: {data.academic.enrollment.academic_term}
+                    </p>
+                  </div>
+                  <div>
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${
+                        data.academic.enrollment.status === 'approved'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : data.academic.enrollment.status === 'pending'
+                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                          : 'bg-red-50 text-red-700 border border-red-200'
+                      }`}
+                    >
+                      {data.academic.enrollment.status === 'approved' && <CheckCircle2 size={13} />}
+                      {data.academic.enrollment.status === 'pending' && <Clock size={13} />}
+                      {data.academic.enrollment.status === 'rejected' && <AlertCircle size={13} />}
+                      <span>Enrollment {data.academic.enrollment.status}</span>
+                    </span>
+                  </div>
+                </div>
+
+                {data.academic.enrollment.status === 'pending' && (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-start gap-2">
+                    <Clock size={15} className="mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-semibold">Academic Enrollment Under Review</p>
+                      <p className="text-[11px] mt-0.5 leading-relaxed">
+                        Your program and subject selections have been submitted and are awaiting administrator verification and section assignment.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {data.academic.enrollment.status === 'rejected' && (
+                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                    <p className="font-semibold">Enrollment Selection Rejected</p>
+                    <p className="text-[11px] mt-0.5">
+                      Reason: {data.academic.enrollment.rejection_reason || 'Please adjust your subject choices or contact administration.'}
+                    </p>
+                  </div>
+                )}
+
+                {/* Enrolled Subjects List */}
+                <div className="mt-6">
+                  <h4 className="text-xs font-semibold text-[#171717] uppercase tracking-wider mb-3">
+                    Coursework & Enrolled Subjects ({data.academic.selectedSubjects?.length || 0})
+                  </h4>
+                  <div className="rounded-lg border border-[#E5E5E5] overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-[#E5E5E5] bg-[#FAFAFA] text-[#737373] uppercase tracking-wider font-semibold">
+                        <tr>
+                          <th className="px-4 py-2.5">Code</th>
+                          <th className="px-4 py-2.5">Subject Name</th>
+                          <th className="px-4 py-2.5">Credits</th>
+                          <th className="px-4 py-2.5">Classification</th>
+                          <th className="px-4 py-2.5">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E5E5E5]">
+                        {data.academic.selectedSubjects?.map((sub) => (
+                          <tr key={sub.id} className="hover:bg-[#FAFAFA]">
+                            <td className="px-4 py-3 font-mono font-medium text-[#171717]">
+                              {sub.subject?.code}
+                            </td>
+                            <td className="px-4 py-3 text-[#171717]">
+                              {sub.subject?.name}
+                            </td>
+                            <td className="px-4 py-3 text-[#525252]">
+                              {sub.subject?.credits} Credits
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                  sub.is_mandatory
+                                    ? 'bg-blue-50 text-blue-700'
+                                    : 'bg-purple-50 text-purple-700'
+                                }`}
+                              >
+                                {sub.is_mandatory ? 'Mandatory' : 'Elective'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                                  sub.status === 'approved'
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : 'bg-amber-50 text-amber-700'
+                                }`}
+                              >
+                                {sub.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Onboarding Form for Unenrolled Students */
+              <div className="rounded-xl border border-[#E5E5E5] bg-white p-6 shadow-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <GraduationCap size={20} className="text-[#171717]" />
+                  <h3 className="text-base font-bold text-[#171717]">Academic Onboarding</h3>
+                </div>
+                <p className="text-xs text-[#737373] leading-relaxed mb-6">
+                  Select your academic degree program, semester, and approved elective coursework to initialize your student academic records.
+                </p>
+
+                {onboardingError && (
+                  <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800 flex items-center gap-2">
+                    <AlertCircle size={15} className="shrink-0" />
+                    <span>{onboardingError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmitOnboarding} className="space-y-4 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#171717] mb-1.5">
+                      1. Select Degree Program *
+                    </label>
+                    <select
+                      value={selectedCourseId}
+                      onChange={(e) => setSelectedCourseId(e.target.value)}
+                      required
+                      className="w-full rounded-md border border-[#E5E5E5] bg-white px-3 py-2 text-xs text-[#171717] focus:border-[#171717] focus:outline-none"
+                    >
+                      {data?.academic?.availableCourses?.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.code} - {c.name} ({c.duration_years} Years, {c.department})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#171717] mb-1.5">
+                      2. Current Semester *
+                    </label>
+                    <select
+                      value={selectedSemester}
+                      onChange={(e) => setSelectedSemester(Number(e.target.value))}
+                      className="w-full rounded-md border border-[#E5E5E5] bg-white px-3 py-2 text-xs text-[#171717] focus:border-[#171717] focus:outline-none"
+                    >
+                      {Array.from({ length: 8 }, (_, i) => i + 1).map((s) => (
+                        <option key={s} value={s}>
+                          Semester {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Curriculum Preview */}
+                  {selectedCourseId && (
+                    <div className="rounded-lg border border-[#E5E5E5] bg-[#FAFAFA] p-4 space-y-3">
+                      <h4 className="text-xs font-semibold text-[#171717]">
+                        Semester {selectedSemester} Curriculum Preview
+                      </h4>
+                      {(() => {
+                        const chosenCourse = data?.academic?.availableCourses?.find((c) => c.id === selectedCourseId);
+                        const currList = ((chosenCourse as any)?.course_subjects || []).filter((cs: any) => cs.semester === selectedSemester);
+                        const mandatoryList = currList.filter((cs: any) => cs.is_mandatory);
+                        const electiveList = currList.filter((cs: any) => !cs.is_mandatory);
+
+                        return (
+                          <div className="space-y-3">
+                            <div>
+                              <p className="text-[11px] font-medium text-[#525252] mb-1">
+                                Mandatory Subjects (Automatically Included):
+                              </p>
+                              {mandatoryList.length === 0 ? (
+                                <p className="text-[11px] text-[#A3A3A3] italic">No mandatory subjects defined for this semester.</p>
+                              ) : (
+                                <ul className="space-y-1">
+                                  {mandatoryList.map((cs: any) => (
+                                    <li key={cs.id} className="text-[11px] text-[#171717] flex items-center gap-1.5">
+                                      <CheckCircle2 size={13} className="text-emerald-600" />
+                                      <span className="font-mono">{cs.subject?.code}</span> - {cs.subject?.name} ({cs.subject?.credits} cr)
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+
+                            {electiveList.length > 0 && (
+                              <div>
+                                <p className="text-[11px] font-medium text-[#525252] mb-1">
+                                  Optional Electives (Select desired subjects):
+                                </p>
+                                <div className="space-y-1.5">
+                                  {electiveList.map((cs: any) => (
+                                    <label key={cs.id} className="flex items-center gap-2 text-[11px] text-[#171717] cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedElectives.includes(cs.subject_id)}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setSelectedElectives([...selectedElectives, cs.subject_id]);
+                                          } else {
+                                            setSelectedElectives(selectedElectives.filter((id) => id !== cs.subject_id));
+                                          }
+                                        }}
+                                        className="rounded border-[#E5E5E5] text-[#111111] focus:ring-0"
+                                      />
+                                      <span className="font-mono">{cs.subject?.code}</span> - {cs.subject?.name} ({cs.subject?.credits} cr)
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  <div className="pt-3 flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isOnboardingSubmitting}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-[#111111] px-5 py-2 text-xs font-medium text-white hover:bg-[#262626] disabled:opacity-50"
+                    >
+                      {isOnboardingSubmitting && <Loader2 size={13} className="animate-spin" />}
+                      <span>Submit Academic Choices for Approval</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Weekly Timetable */}
+        {activeTab === 'timetable' && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[#E5E5E5] bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-[#171717]">My Weekly Class Timetable</h3>
+                  <p className="text-[11px] text-[#737373] mt-0.5">
+                    Synchronized schedule for your enrolled program and assigned section.
+                  </p>
+                </div>
+                {data?.academic?.enrollment && (
+                  <span className="rounded-md border border-[#E5E5E5] bg-[#F7F7F7] px-2.5 py-1 text-[11px] font-medium text-[#171717]">
+                    Sec {data.academic.enrollment.section} &bull; Sem {data.academic.enrollment.semester}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {DAYS_OF_WEEK.map((day) => {
+              const daySlots = (data?.academic?.personalTimetable || []).filter(
+                (s) => s.day_of_week === day.value
+              );
+
+              return (
+                <div
+                  key={day.value}
+                  className="rounded-xl border border-[#E5E5E5] bg-white shadow-xs overflow-hidden"
+                >
+                  <div className="flex items-center justify-between border-b border-[#E5E5E5] bg-[#FAFAFA] px-5 py-2.5">
+                    <span className="text-xs font-bold text-[#171717]">{day.label}</span>
+                    <span className="text-[11px] text-[#737373]">
+                      {daySlots.length} {daySlots.length === 1 ? 'class' : 'classes'}
+                    </span>
+                  </div>
+
+                  <div className="p-4">
+                    {daySlots.length === 0 ? (
+                      <p className="text-center py-2 text-xs text-[#A3A3A3]">
+                        No classes scheduled for {day.label}.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {daySlots.map((slot) => (
+                          <div
+                            key={slot.id}
+                            className="rounded-lg border border-[#E5E5E5] bg-white p-3 text-xs hover:border-[#171717] transition-colors"
+                          >
+                            <span className="font-semibold text-[#171717]">
+                              {slot.subject?.code} - {slot.subject?.name}
+                            </span>
+                            <div className="mt-2 space-y-1 text-[11px] text-[#525252]">
+                              <div className="flex items-center gap-1.5">
+                                <Clock size={12} className="text-[#A3A3A3]" />
+                                <span className="font-mono">
+                                  {slot.start_time.slice(0, 5)} - {slot.end_time.slice(0, 5)}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <GraduationCap size={12} className="text-[#A3A3A3]" />
+                                <span>
+                                  {slot.teacher ? `${slot.teacher.first_name} ${slot.teacher.last_name}` : 'Faculty Member'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <MapPin size={12} className="text-[#A3A3A3]" />
+                                <span>{slot.room}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Tab 1: Attendance History */}
         {activeTab === 'attendance' && (

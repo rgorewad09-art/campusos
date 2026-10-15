@@ -26,8 +26,18 @@ export default function Header({ title, onMenuOpen }: HeaderProps) {
   }, []);
 
   function handleLogout() {
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        const channel = new BroadcastChannel('campusos_session_sync');
+        channel.postMessage({ type: 'LOGOUT', timestamp: Date.now() });
+        channel.close();
+      }
+      localStorage.setItem('campusos_tab_logout', String(Date.now()));
+    } catch {
+      // Fallback
+    }
     startLogoutTransition(async () => {
-      await logoutAction();
+      await logoutAction('/login?error=logged_out');
     });
   }
 

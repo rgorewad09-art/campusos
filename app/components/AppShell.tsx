@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import SessionTimeoutWarning from './SessionTimeoutWarning';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -18,6 +19,9 @@ export default function AppShell({ children, pageTitle }: AppShellProps) {
 
   return (
     <div className="flex min-h-screen bg-[#F7F7F7]">
+      {/* Session timeout idle warning */}
+      <SessionTimeoutWarning />
+
       {/* Sidebar */}
       <Sidebar
         mobileOpen={mobileNavOpen}

@@ -5,6 +5,11 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
   Users,
+  GraduationCap,
+  BookOpen,
+  Library,
+  UserCheck,
+  CalendarDays,
   CalendarCheck,
   FileText,
   ClipboardList,
@@ -24,6 +29,11 @@ export interface NavItem {
 export const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard },
   { label: 'Students', href: '/students', icon: Users },
+  { label: 'Faculty', href: '/teachers', icon: GraduationCap },
+  { label: 'Courses', href: '/academic/courses', icon: BookOpen },
+  { label: 'Subjects', href: '/academic/subjects', icon: Library },
+  { label: 'Enrollments', href: '/academic/enrollments', icon: UserCheck },
+  { label: 'Timetable', href: '/academic/timetable', icon: CalendarDays },
   { label: 'Attendance', href: '/attendance', icon: CalendarCheck },
   { label: 'Documents', href: '/documents', icon: FileText },
   { label: 'Assignments', href: '/assignments', icon: ClipboardList },

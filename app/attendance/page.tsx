@@ -1,5 +1,7 @@
 import AttendanceView from './AttendanceView';
+import { requireServerAuth } from '@/src/lib/auth-guard';
 
-export default function AttendancePage() {
+export default async function AttendancePage() {
+  await requireServerAuth(['admin', 'teacher']);
   return <AttendanceView />;
 }

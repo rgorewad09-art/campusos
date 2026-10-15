@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import StudentProfileView from './StudentProfileView';
 import AppShell from '../../components/AppShell';
 import StudentProfileSkeleton from '@/src/components/skeletons/StudentProfileSkeleton';
+import { requireServerAuth } from '@/src/lib/auth-guard';
 
 export const instant = false;
 
@@ -10,6 +11,7 @@ interface PageProps {
 }
 
 export default async function StudentProfilePage({ params }: PageProps) {
+  await requireServerAuth(['admin', 'teacher']);
   const { id } = await params;
 
   return (
