@@ -18,6 +18,7 @@ import {
   Phone,
   Mail,
   Shield,
+  ShieldCheck,
   Loader2,
   Info,
   Calendar,
@@ -39,6 +40,7 @@ import { submitStudentEnrollmentAction } from '@/app/actions/academic';
 import { DAYS_OF_WEEK } from '@/src/types/academic';
 import { DOCUMENT_CATEGORIES, type StudentDocument } from '@/src/types/document';
 import StudentUploadModal from './components/StudentUploadModal';
+import StudentOtpCheckIn from './components/StudentOtpCheckIn';
 import SessionTimeoutWarning from '@/app/components/SessionTimeoutWarning';
 
 const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
@@ -402,7 +404,7 @@ export default function StudentDashboardPage() {
             }`}
           >
             <CalendarCheck size={14} />
-            <span>Attendance History ({attendance.totalSessions})</span>
+            <span>Attendance & Check-In ({attendance.totalSessions})</span>
           </button>
           <button
             onClick={() => setActiveTab('documents')}
@@ -755,63 +757,87 @@ export default function StudentDashboardPage() {
           </div>
         )}
 
-        {/* Tab 1: Attendance History */}
+        {/* Tab 1: Attendance History & Live Check-In */}
         {activeTab === 'attendance' && (
-          <div className="rounded-xl border border-[#E5E5E5] bg-white shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-[#E5E5E5] flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-[#171717]">Attendance Log</h3>
-                <p className="text-[11px] text-[#737373] mt-0.5">
-                  Daily recorded class and lecture attendance sessions.
-                </p>
-              </div>
-              <span className="text-[11px] text-[#737373]">
-                Showing {attendance.recentRecords.length} recorded session{attendance.recentRecords.length === 1 ? '' : 's'}
-              </span>
-            </div>
+          <div className="space-y-6">
+            <StudentOtpCheckIn onAttendanceRecorded={() => fetchData(true)} />
 
-            {attendance.recentRecords.length === 0 ? (
-              <div className="p-12 text-center text-xs text-[#737373]">
-                No attendance sessions have been recorded for your account yet.
+            <div className="rounded-xl border border-[#E5E5E5] bg-white shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-[#E5E5E5] flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-[#171717]">Attendance Log</h3>
+                  <p className="text-[11px] text-[#737373] mt-0.5">
+                    Official recorded course and lecture attendance records.
+                  </p>
+                </div>
+                <span className="text-[11px] text-[#737373]">
+                  Showing {attendance.recentRecords.length} recorded session{attendance.recentRecords.length === 1 ? '' : 's'}
+                </span>
               </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="border-b border-[#E5E5E5] bg-[#FAFAFA] text-[#737373]">
-                    <tr>
-                      <th className="px-6 py-3 font-medium">Date</th>
-                      <th className="px-6 py-3 font-medium">Status</th>
-                      <th className="px-6 py-3 font-medium">Remarks</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E5E5E5]">
-                    {attendance.recentRecords.map((rec) => (
-                      <tr key={rec.id} className="hover:bg-[#F7F7F7] transition-colors">
-                        <td className="px-6 py-3.5 font-medium text-[#171717]">
-                          {rec.attendance_date}
-                        </td>
-                        <td className="px-6 py-3.5">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${
-                              rec.status === 'present'
-                                ? 'bg-[#F0FDF4] text-[#166534] border border-[#BBF7D0]'
-                                : rec.status === 'absent'
-                                ? 'bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA]'
-                                : 'bg-[#FFFBEB] text-[#92400E] border border-[#FDE68A]'
-                            }`}
-                          >
-                            {rec.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-3.5 text-[#737373]">
-                          {rec.remarks || '—'}
-                        </td>
+
+              {attendance.recentRecords.length === 0 ? (
+                <div className="p-12 text-center text-xs text-[#737373]">
+                  No attendance sessions have been recorded for your account yet.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-[#E5E5E5] bg-[#FAFAFA] text-[#737373]">
+                      <tr>
+                        <th className="px-6 py-3 font-medium">Date</th>
+                        <th className="px-6 py-3 font-medium">Status</th>
+                        <th className="px-6 py-3 font-medium">Method</th>
+                        <th className="px-6 py-3 font-medium">Remarks</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody className="divide-y divide-[#E5E5E5]">
+                      {attendance.recentRecords.map((rec) => (
+                        <tr key={rec.id} className="hover:bg-[#F7F7F7] transition-colors">
+                          <td className="px-6 py-3.5 font-medium text-[#171717]">
+                            {rec.attendance_date}
+                          </td>
+                          <td className="px-6 py-3.5">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${
+                                rec.status === 'present'
+                                  ? 'bg-[#F0FDF4] text-[#166534] border border-[#BBF7D0]'
+                                  : rec.status === 'absent'
+                                  ? 'bg-[#FEF2F2] text-[#991B1B] border border-[#FECACA]'
+                                  : 'bg-[#FFFBEB] text-[#92400E] border border-[#FDE68A]'
+                              }`}
+                            >
+                              {rec.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3.5">
+                            {rec.verification_method === 'otp' ? (
+                              <span className="inline-flex items-center gap-1 rounded bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 border border-blue-200">
+                                <ShieldCheck size={11} />
+                                <span>OTP Verified</span>
+                              </span>
+                            ) : rec.verification_method === 'manual' ? (
+                              <span className="inline-flex items-center gap-1 rounded bg-purple-50 px-2 py-0.5 text-[10px] font-medium text-purple-700 border border-purple-200">
+                                <User size={11} />
+                                <span>Faculty Override</span>
+                              </span>
+                            ) : (
+                              <span className="text-[#A3A3A3] text-[11px]">—</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-3.5 text-[#737373]">
+                            {rec.override_reason ? (
+                              <span className="italic text-[#525252]">{rec.override_reason}</span>
+                            ) : (
+                              rec.remarks || '—'
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

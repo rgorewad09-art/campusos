@@ -14,13 +14,17 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+function getAdminCredentials() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return { supabaseUrl, serviceRoleKey };
+}
 
 /**
  * Returns true if the service_role key is present in environment variables.
  */
 export function isServiceRoleConfigured(): boolean {
+  const { supabaseUrl, serviceRoleKey } = getAdminCredentials();
   return Boolean(supabaseUrl && serviceRoleKey && serviceRoleKey.trim().length > 0);
 }
 
@@ -29,6 +33,7 @@ export function isServiceRoleConfigured(): boolean {
  * Returns null if the service_role key is not configured in the environment.
  */
 export function createAdminClient(): SupabaseClient | null {
+  const { supabaseUrl, serviceRoleKey } = getAdminCredentials();
   if (!isServiceRoleConfigured()) {
     return null;
   }

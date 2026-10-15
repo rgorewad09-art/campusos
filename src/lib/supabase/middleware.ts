@@ -311,6 +311,13 @@ export async function updateSession(request: NextRequest) {
 
     // B. Teachers cannot access admin-only settings, student enrollment, or student portal views
     if (role === 'teacher') {
+      // Redirect legacy admin attendance path to dedicated teacher attendance portal
+      if (pathname === '/attendance' || pathname.startsWith('/attendance/')) {
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = '/teacher/attendance';
+        return redirectWithCookies(redirectUrl, supabaseResponse);
+      }
+
       const isTeacherBlocked =
         pathname === '/' ||
         pathname.startsWith('/settings') ||

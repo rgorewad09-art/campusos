@@ -19,6 +19,7 @@ import {
 } from '@/src/lib/session';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { connection } from 'next/server';
 
 export type UserRole = 'admin' | 'teacher' | 'student';
 
@@ -37,6 +38,7 @@ export async function requireServerAuth(
   allowedRoles: UserRole[],
   options: { redirectTo?: string } = {}
 ): Promise<GuardedUser> {
+  await connection();
   const cookieStore = await cookies();
   const supabase = await createClient();
 

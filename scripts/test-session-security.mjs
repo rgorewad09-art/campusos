@@ -12,6 +12,7 @@
  *   node --env-file=.env.local scripts/test-session-security.mjs
  */
 
+import fs from 'node:fs';
 import { createAdminClient } from '../src/lib/supabase/admin.ts';
 import { createClient } from '@supabase/supabase-js';
 import {
@@ -22,6 +23,17 @@ import {
   CAMPUSOS_ACTIVITY_COOKIE,
   CAMPUSOS_REMEMBER_COOKIE,
 } from '../src/lib/session.ts';
+
+// Automatically load .env.local if environment variables are not already present
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY && fs.existsSync('.env.local')) {
+  try {
+    if (typeof process.loadEnvFile === 'function') {
+      process.loadEnvFile('.env.local');
+    }
+  } catch {
+    // ignore
+  }
+}
 
 let passed = 0;
 let failed = 0;

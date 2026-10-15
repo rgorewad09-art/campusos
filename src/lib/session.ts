@@ -30,18 +30,20 @@ export const CAMPUSOS_REMEMBER_COOKIE = 'campusos_remember';
  */
 export function isSessionExpired(
   lastActivityTime: number | null | undefined,
-  currentTime: number = Date.now()
+  currentTime?: number
 ): boolean {
   if (!lastActivityTime || isNaN(lastActivityTime)) {
     return false;
   }
 
+  const now = currentTime ?? Date.now();
+
   // Sanity check: Reject timestamps claimed to be in the far future (> 60s ahead)
-  if (lastActivityTime > currentTime + 60_000) {
+  if (lastActivityTime > now + 60_000) {
     return true;
   }
 
-  return currentTime - lastActivityTime > SESSION_IDLE_TIMEOUT_MS;
+  return now - lastActivityTime > SESSION_IDLE_TIMEOUT_MS;
 }
 
 /**

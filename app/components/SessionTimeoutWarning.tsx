@@ -37,6 +37,7 @@ function getPortalLoginUrl(errorType: 'logged_out' | 'session_expired'): string 
 }
 
 export default function SessionTimeoutWarning() {
+  const [isMounted, setIsMounted] = useState(false);
   const [isWarningOpen, setIsWarningOpen] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(SESSION_WARNING_SECONDS);
   const [isExtending, setIsExtending] = useState(false);
@@ -89,6 +90,7 @@ export default function SessionTimeoutWarning() {
   }, [broadcastActivity]);
 
   useEffect(() => {
+    setIsMounted(true);
     lastActiveRef.current = Date.now();
 
     // 1. Initialize BroadcastChannel for cross-tab communication
@@ -168,7 +170,7 @@ export default function SessionTimeoutWarning() {
     };
   }, [broadcastActivity, isWarningOpen]);
 
-  if (!isWarningOpen) {
+  if (!isMounted || !isWarningOpen) {
     return null;
   }
 

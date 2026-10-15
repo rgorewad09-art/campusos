@@ -243,7 +243,7 @@ export default function TeacherDashboardPage() {
 
             <div className="flex items-center gap-2">
               <Link
-                href="/attendance"
+                href="/teacher/attendance"
                 className="inline-flex items-center gap-1.5 rounded-md bg-[#111111] px-4 py-2 text-xs font-medium text-white hover:bg-[#262626] transition-colors"
               >
                 <CalendarCheck size={14} />
@@ -414,7 +414,7 @@ export default function TeacherDashboardPage() {
                         {cls.status}
                       </span>
                       <Link
-                        href="/attendance"
+                        href="/teacher/attendance"
                         className="inline-flex items-center gap-1 rounded bg-[#111111] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#262626] transition-colors"
                       >
                         <CalendarCheck size={12} />
