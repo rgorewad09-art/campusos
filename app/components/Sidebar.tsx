@@ -93,12 +93,12 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
               aria-current={isActive ? 'page' : undefined}
               className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-white text-[#111111]'
+                  ? 'bg-white text-[#111111] dark:bg-[#EDEDED] dark:text-[#111111] font-semibold shadow-xs'
                   : 'text-[#A3A3A3] hover:bg-[#1F1F1F] hover:text-white'
               }`}
             >
-              <Icon size={16} strokeWidth={isActive ? 2.5 : 2} />
-              {label}
+              <Icon size={16} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-[#111111] dark:text-[#111111]' : ''} />
+              <span className={isActive ? 'text-[#111111] dark:text-[#111111]' : ''}>{label}</span>
             </Link>
           );
         })}

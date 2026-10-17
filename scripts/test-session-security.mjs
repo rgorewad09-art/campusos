@@ -219,6 +219,7 @@ async function runTests() {
     .from('students')
     .select('email, student_code')
     .not('email', 'is', null)
+    .not('user_id', 'is', null)
     .limit(1);
 
   if (sampleStudents && sampleStudents.length > 0) {

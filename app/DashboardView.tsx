@@ -106,17 +106,12 @@ export default function DashboardView({ displayName = 'Administrator' }: Dashboa
       {/* Attendance Trends & Analytics Visualizer */}
       <AttendanceTrendChart />
 
-      {/* Bottom Grid: Live Audit Activity + Quick Actions */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Recent Audit Activity Stream */}
-        <div className="lg:col-span-2">
-          <RecentActivity />
-        </div>
+      {/* Quick Actions Strip */}
+      <QuickActions />
 
-        {/* Quick Actions Strip */}
-        <div>
-          <QuickActions />
-        </div>
+      {/* Recent Audit Activity Stream */}
+      <div className="w-full">
+        <RecentActivity />
       </div>
     </div>
   );

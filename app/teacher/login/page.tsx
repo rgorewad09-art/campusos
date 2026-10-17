@@ -21,6 +21,8 @@ function TeacherLoginForm() {
       ? '/teacher/dashboard'
       : rawRedirectTo;
 
+  const isRecovered = searchParams.get('recovered') === 'true';
+
   const [errorMessage, setErrorMessage] = useState<string | null>(
     urlError === 'unauthorized'
       ? 'Access denied: Please sign in with an authorized faculty account.'
@@ -75,6 +77,18 @@ function TeacherLoginForm() {
           </p>
         </div>
 
+        {/* Password Reset Success Banner */}
+        {isRecovered && !errorMessage && (
+          <div
+            role="status"
+            className="mb-4 flex items-start gap-2.5 rounded-lg border border-[#E5E5E5] dark:border-[#333333] bg-[#F7F7F7] dark:bg-[#1E1E1E] p-3 text-xs text-[#171717] dark:text-[#EDEDED]"
+          >
+            <div className="flex-1 leading-relaxed">
+              Your password has been reset successfully. Please sign in with your new credentials.
+            </div>
+          </div>
+        )}
+
         {/* Error State Banner */}
         {errorMessage && (
           <div
@@ -112,12 +126,20 @@ function TeacherLoginForm() {
           </div>
 
           <div>
-            <label
-              htmlFor="password"
-              className="block text-xs font-medium text-[#171717] dark:text-[#EDEDED] mb-1"
-            >
-              Password
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label
+                htmlFor="password"
+                className="block text-xs font-medium text-[#171717] dark:text-[#EDEDED]"
+              >
+                Password
+              </label>
+              <Link
+                href="/forgot-password?role=teacher"
+                className="text-[11px] text-[#737373] dark:text-[#8C8C8C] hover:text-[#171717] dark:hover:text-[#EDEDED] hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <input
               id="password"
               name="password"

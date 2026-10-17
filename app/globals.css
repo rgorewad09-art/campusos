@@ -49,8 +49,31 @@ html.dark :focus-visible {
 }
 
 /* Monochromatic Dark Mode Surface & Text Overrides */
-html.dark .bg-white {
+html.dark .bg-white:not([aria-current="page"]) {
   background-color: #141414 !important;
+}
+
+/* Sidebar & Navigation Active State High Contrast Preservation */
+aside [aria-current="page"],
+nav [aria-current="page"] {
+  background-color: #FFFFFF !important;
+  color: #111111 !important;
+}
+
+html.dark aside [aria-current="page"],
+html.dark nav [aria-current="page"] {
+  background-color: #EDEDED !important;
+  color: #111111 !important;
+}
+
+aside [aria-current="page"] *,
+nav [aria-current="page"] * {
+  color: #111111 !important;
+}
+
+html.dark aside [aria-current="page"] *,
+html.dark nav [aria-current="page"] * {
+  color: #111111 !important;
 }
 
 html.dark .bg-\[\#F7F7F7\] {

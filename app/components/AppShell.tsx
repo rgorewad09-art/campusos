@@ -29,12 +29,12 @@ export default function AppShell({ children, pageTitle }: AppShellProps) {
       />
 
       {/* Main content column */}
-      <div className="flex flex-1 flex-col min-w-0">
+      <div className="flex flex-1 flex-col min-w-0 overflow-x-hidden w-full max-w-full">
         <Header
           title={pageTitle}
           onMenuOpen={() => setMobileNavOpen(true)}
         />
-        <main className="flex-1 px-6 py-6">
+        <main className="flex-1 px-4 sm:px-6 py-6 w-full max-w-full">
           {children}
         </main>
       </div>
