@@ -148,65 +148,38 @@ export async function getStudentDashboardDataAction(): Promise<{
   try {
     const { supabase, student } = await requireStudent();
 
-    // 1. Attendance records for this student
-    const { data: attendanceRows, error: attError } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('student_id', student.id)
-      .order('attendance_date', { ascending: false });
+    const adminClient = createAdminClient();
+    const dbClient = adminClient || supabase;
 
-    if (attError) {
-      console.error('[CampusOS Student Portal] Attendance fetch error:', attError);
-    }
-
-    const records = (attendanceRows as AttendanceRecord[]) || [];
-    const totalSessions = records.length;
-    const presentCount = records.filter((r) => r.status === 'present').length;
-    const absentCount = records.filter((r) => r.status === 'absent').length;
-    const lateCount = records.filter((r) => r.status === 'late').length;
-    const percentage =
-      totalSessions > 0 ? Math.round((presentCount / totalSessions) * 100) : null;
-
-    // 2. Personal documents
-    const { data: documentRows, error: docError } = await supabase
-      .from('student_documents')
-      .select('*')
-      .eq('student_id', student.id)
-      .order('created_at', { ascending: false });
-
-    if (docError) {
-      console.error('[CampusOS Student Portal] Documents fetch error:', docError);
-    }
-
-    // 3. Linked guardians
-    const { data: guardianRows, error: guardError } = await supabase
-      .from('student_guardians')
-      .select(`
-        student_id,
-        guardian_id,
-        is_primary,
-        guardians (
-          id,
-          full_name,
-          email,
-          phone,
-          relationship,
-          created_at
-        )
-      `)
-      .eq('student_id', student.id);
-
-    if (guardError) {
-      console.error('[CampusOS Student Portal] Guardians fetch error:', guardError);
-    }
-
-    // 4. Academic enrollment and subjects
-    let academicData: StudentDashboardData['academic'] = undefined;
-    try {
-      const adminClient = createAdminClient();
-      const dbClient = adminClient || supabase;
-
-      const { data: enrollment } = await dbClient
+    // Run independent student data queries concurrently in parallel
+    const [attRes, docRes, guardRes, enrollRes, coursesRes] = await Promise.all([
+      supabase
+        .from('attendance')
+        .select('*')
+        .eq('student_id', student.id)
+        .order('attendance_date', { ascending: false }),
+      supabase
+        .from('student_documents')
+        .select('*')
+        .eq('student_id', student.id)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('student_guardians')
+        .select(`
+          student_id,
+          guardian_id,
+          is_primary,
+          guardians (
+            id,
+            full_name,
+            email,
+            phone,
+            relationship,
+            created_at
+          )
+        `)
+        .eq('student_id', student.id),
+      dbClient
         .from('student_academic_enrollments')
         .select(`
           *,
@@ -215,46 +188,8 @@ export async function getStudentDashboardDataAction(): Promise<{
         .eq('student_id', student.id)
         .order('enrolled_at', { ascending: false })
         .limit(1)
-        .maybeSingle();
-
-      let selectedSubjects: StudentSelectedSubject[] = [];
-      let personalTimetable: TimetableEntry[] = [];
-
-      if (enrollment) {
-        const { data: subs } = await dbClient
-          .from('student_selected_subjects')
-          .select(`
-            *,
-            subject:subjects(*)
-          `)
-          .eq('enrollment_id', enrollment.id);
-
-        if (subs) selectedSubjects = subs as StudentSelectedSubject[];
-
-        if (enrollment.status === 'approved') {
-          const { data: tt } = await dbClient
-            .from('timetables')
-            .select(`
-              *,
-              course:courses(*),
-              subject:subjects(*),
-              teacher:teachers(*)
-            `)
-            .eq('course_id', enrollment.course_id)
-            .eq('semester', enrollment.semester)
-            .eq('section', enrollment.section)
-            .eq('academic_term', enrollment.academic_term)
-            .eq('status', 'approved')
-            .order('day_of_week', { ascending: true })
-            .order('start_time', { ascending: true });
-
-          if (tt) personalTimetable = tt as TimetableEntry[];
-        }
-      }
-
-      // If not enrolled or pending, also fetch available courses & curriculum for onboarding
-      let availableCourses: any[] = [];
-      const { data: cList } = await dbClient
+        .maybeSingle(),
+      dbClient
         .from('courses')
         .select(`
           *,
@@ -263,19 +198,71 @@ export async function getStudentDashboardDataAction(): Promise<{
             subject:subjects(*)
           )
         `)
-        .eq('status', 'active');
+        .eq('status', 'active'),
+    ]);
 
-      if (cList) availableCourses = cList;
-
-      academicData = {
-        enrollment: enrollment as StudentAcademicEnrollment | undefined,
-        selectedSubjects,
-        personalTimetable,
-        availableCourses,
-      };
-    } catch {
-      // Academic tables may not yet be initialized in Supabase
+    if (attRes.error) {
+      console.error('[CampusOS Student Portal] Attendance fetch error:', attRes.error);
     }
+    if (docRes.error) {
+      console.error('[CampusOS Student Portal] Documents fetch error:', docRes.error);
+    }
+    if (guardRes.error) {
+      console.error('[CampusOS Student Portal] Guardians fetch error:', guardRes.error);
+    }
+
+    const records = (attRes.data as AttendanceRecord[]) || [];
+    const totalSessions = records.length;
+    const presentCount = records.filter((r) => r.status === 'present').length;
+    const absentCount = records.filter((r) => r.status === 'absent').length;
+    const lateCount = records.filter((r) => r.status === 'late').length;
+    const percentage =
+      totalSessions > 0 ? Math.round((presentCount / totalSessions) * 100) : null;
+
+    // Process Academic enrollment and secondary timetable/subjects
+    let academicData: StudentDashboardData['academic'] = undefined;
+    const enrollment = enrollRes.data;
+    let selectedSubjects: StudentSelectedSubject[] = [];
+    let personalTimetable: TimetableEntry[] = [];
+
+    if (enrollment) {
+      const [subsRes, ttRes] = await Promise.all([
+        dbClient
+          .from('student_selected_subjects')
+          .select(`
+            *,
+            subject:subjects(*)
+          `)
+          .eq('enrollment_id', enrollment.id),
+        enrollment.status === 'approved'
+          ? dbClient
+              .from('timetables')
+              .select(`
+                *,
+                course:courses(*),
+                subject:subjects(*),
+                teacher:teachers(*)
+              `)
+              .eq('course_id', enrollment.course_id)
+              .eq('semester', enrollment.semester)
+              .eq('section', enrollment.section)
+              .eq('academic_term', enrollment.academic_term)
+              .eq('status', 'approved')
+              .order('day_of_week', { ascending: true })
+              .order('start_time', { ascending: true })
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      if (subsRes.data) selectedSubjects = subsRes.data as StudentSelectedSubject[];
+      if (ttRes.data) personalTimetable = ttRes.data as TimetableEntry[];
+    }
+
+    academicData = {
+      enrollment: enrollment as StudentAcademicEnrollment | undefined,
+      selectedSubjects,
+      personalTimetable,
+      availableCourses: coursesRes.data || [],
+    };
 
     return {
       success: true,
@@ -289,8 +276,8 @@ export async function getStudentDashboardDataAction(): Promise<{
           percentage,
           recentRecords: records.slice(0, 50),
         },
-        documents: (documentRows as StudentDocument[]) || [],
-        guardians: (guardianRows as unknown as StudentGuardianLink[]) || [],
+        documents: (docRes.data as StudentDocument[]) || [],
+        guardians: (guardRes.data as unknown as StudentGuardianLink[]) || [],
         academic: academicData,
       },
     };

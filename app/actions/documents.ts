@@ -132,6 +132,76 @@ export async function getStudentDocumentsAction(
 }
 
 /**
+ * Fetch all student documents with student details for Document Management.
+ */
+export async function getAllDocumentsAction(options?: {
+  status?: string;
+  search?: string;
+}): Promise<{
+  success: boolean;
+  documents?: (StudentDocument & {
+    student?: {
+      id: string;
+      first_name: string;
+      last_name: string;
+      student_code: string;
+    };
+  })[];
+  error?: string;
+}> {
+  try {
+    const { supabase } = await requireAdmin();
+
+    let query = supabase
+      .from('student_documents')
+      .select(`
+        *,
+        student:students(
+          id,
+          first_name,
+          last_name,
+          student_code
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (options?.status && options.status !== 'all') {
+      query = query.eq('verification_status', options.status);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('[CampusOS Documents] getAllDocumentsAction query error:', error);
+      return { success: false, error: 'Failed to retrieve documents.' };
+    }
+
+    let docs = (data as any[]) || [];
+    if (options?.search && options.search.trim().length > 0) {
+      const q = options.search.trim().toLowerCase();
+      docs = docs.filter((d) => {
+        const studentName = `${d.student?.first_name || ''} ${d.student?.last_name || ''}`.toLowerCase();
+        const studentCode = (d.student?.student_code || '').toLowerCase();
+        const filename = (d.original_filename || '').toLowerCase();
+        return studentName.includes(q) || studentCode.includes(q) || filename.includes(q);
+      });
+    }
+
+    return {
+      success: true,
+      documents: docs,
+    };
+  } catch (err: unknown) {
+    console.error('[CampusOS Documents] getAllDocumentsAction unhandled error:', err);
+    const message =
+      isAuthError(err) && err instanceof Error
+        ? err.message
+        : 'Failed to retrieve documents.';
+    return { success: false, error: message };
+  }
+}
+
+/**
  * Upload a new student document to private Storage and create database record.
  * Handles orphaned storage files if the database insert fails.
  */

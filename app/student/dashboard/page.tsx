@@ -42,6 +42,7 @@ import { DOCUMENT_CATEGORIES, type StudentDocument } from '@/src/types/document'
 import StudentUploadModal from './components/StudentUploadModal';
 import StudentOtpCheckIn from './components/StudentOtpCheckIn';
 import SessionTimeoutWarning from '@/app/components/SessionTimeoutWarning';
+import ThemeToggle from '@/app/components/ThemeToggle';
 
 const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
   DOCUMENT_CATEGORIES.map((c) => [c.value, c.label])
@@ -226,6 +227,7 @@ export default function StudentDashboardPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <ThemeToggle />
           <button
             onClick={() => fetchData(true)}
             title="Refresh Data"

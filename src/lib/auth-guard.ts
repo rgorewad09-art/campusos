@@ -164,6 +164,11 @@ export async function requireServerAuth(
     id: user.id,
     email: user.email,
     role,
-    displayName: profile?.display_name || user.email?.split('@')[0] || 'User',
+    displayName:
+      user.user_metadata?.display_name ||
+      user.user_metadata?.full_name ||
+      profile?.display_name ||
+      user.email?.split('@')[0] ||
+      'User',
   };
 }

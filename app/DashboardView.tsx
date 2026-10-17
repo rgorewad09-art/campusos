@@ -9,10 +9,26 @@ import QuickActions from './components/QuickActions';
 import { getDashboardStatsAction } from '@/app/actions/analytics';
 import type { DashboardStats } from '@/src/types/analytics';
 
-export default function DashboardView() {
+interface DashboardViewProps {
+  displayName?: string;
+}
+
+function getTimeBasedGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return 'Good morning';
+  if (hour >= 12 && hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+export default function DashboardView({ displayName = 'Administrator' }: DashboardViewProps) {
+  const [greeting, setGreeting] = useState<string>('Good morning');
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setGreeting(getTimeBasedGreeting());
+  }, []);
 
   const fetchStats = useCallback(async () => {
     setIsLoading(true);
@@ -43,7 +59,7 @@ export default function DashboardView() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold text-[#171717]">
-            Good morning, Administrator
+            {greeting}, {displayName}
           </h2>
           <p className="mt-1 text-xs text-[#737373]">
             Here&rsquo;s an overview of CampusOS operational activity and live metrics.

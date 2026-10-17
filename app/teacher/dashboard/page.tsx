@@ -32,6 +32,7 @@ import type {
 import type { Student } from '@/src/types/student';
 import { DAYS_OF_WEEK, DEFAULT_ACADEMIC_TERM } from '@/src/types/academic';
 import SessionTimeoutWarning from '@/app/components/SessionTimeoutWarning';
+import ThemeToggle from '@/app/components/ThemeToggle';
 
 export default function TeacherDashboardPage() {
   const [teacher, setTeacher] = useState<Teacher | null>(null);
@@ -190,6 +191,7 @@ export default function TeacherDashboardPage() {
           <span className="text-xs text-[#737373] hidden sm:inline">
             Logged in as <strong className="text-[#171717]">{teacher.first_name} {teacher.last_name}</strong>
           </span>
+          <ThemeToggle />
           <button
             onClick={handleSignOut}
             className="flex items-center gap-1.5 rounded-md border border-[#E5E5E5] bg-white px-3 py-1.5 text-xs font-medium text-[#737373] hover:text-[#171717] hover:border-[#171717] transition-colors"

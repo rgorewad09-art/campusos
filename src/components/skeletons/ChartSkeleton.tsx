@@ -17,14 +17,14 @@ export default function ChartSkeleton({ bars = 7 }: ChartSkeletonProps) {
     <div
       aria-busy="true"
       aria-label="Loading attendance trends chart"
-      className="rounded-xl border border-[#E5E5E5] bg-white p-5 sm:p-6"
+      className="rounded-xl border border-[#E5E5E5] dark:border-[#262626] bg-white dark:bg-[#141414] p-5 sm:p-6"
     >
       <span className="sr-only">Loading attendance trend metrics...</span>
 
       {/* Header with Title and Range Selector */}
       <div
         aria-hidden="true"
-        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[#E5E5E5] pb-4"
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[#E5E5E5] dark:border-[#262626] pb-4"
       >
         <div className="space-y-1.5">
           <Skeleton className="h-4 w-44" />
@@ -32,7 +32,7 @@ export default function ChartSkeleton({ bars = 7 }: ChartSkeletonProps) {
         </div>
 
         {/* 7/14/30 day toggle pill */}
-        <div className="flex items-center gap-1 rounded-lg border border-[#E5E5E5] bg-[#F7F7F7] p-1 self-start sm:self-auto">
+        <div className="flex items-center gap-1 rounded-lg border border-[#E5E5E5] dark:border-[#333333] bg-[#F7F7F7] dark:bg-[#1E1E1E] p-1 self-start sm:self-auto">
           <Skeleton className="h-6 w-14 rounded-md" />
           <Skeleton className="h-6 w-14 rounded-md" />
           <Skeleton className="h-6 w-14 rounded-md" />
@@ -42,7 +42,7 @@ export default function ChartSkeleton({ bars = 7 }: ChartSkeletonProps) {
       {/* Aggregate KPI Strip */}
       <div
         aria-hidden="true"
-        className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-4 border-b border-[#E5E5E5]"
+        className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-4 border-b border-[#E5E5E5] dark:border-[#262626]"
       >
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="space-y-1.5">
@@ -73,7 +73,7 @@ export default function ChartSkeleton({ bars = 7 }: ChartSkeletonProps) {
         </div>
 
         {/* Footer info line */}
-        <div className="mt-3 flex items-center justify-between border-t border-[#E5E5E5] pt-2">
+        <div className="mt-3 flex items-center justify-between border-t border-[#E5E5E5] dark:border-[#262626] pt-2">
           <Skeleton className="h-3 w-36" />
           <Skeleton className="h-3 w-48 hidden sm:block" />
         </div>

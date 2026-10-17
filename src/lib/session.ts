@@ -21,6 +21,7 @@ export const ACTIVITY_REFRESH_THROTTLE_MS = ACTIVITY_REFRESH_THROTTLE_SECONDS * 
 // Cookie identifiers
 export const CAMPUSOS_ACTIVITY_COOKIE = 'campusos_last_activity';
 export const CAMPUSOS_REMEMBER_COOKIE = 'campusos_remember';
+export const CAMPUSOS_ROLE_COOKIE = 'campusos_role';
 
 /**
  * Checks whether an activity timestamp represents an expired idle session.

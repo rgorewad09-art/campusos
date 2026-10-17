@@ -17,6 +17,7 @@ import {
   ACTIVITY_REFRESH_THROTTLE_MS,
   CAMPUSOS_ACTIVITY_COOKIE,
   CAMPUSOS_REMEMBER_COOKIE,
+  CAMPUSOS_ROLE_COOKIE,
   isSessionExpired,
   parseActivityTimestamp,
 } from '@/src/lib/session';
@@ -163,6 +164,21 @@ export async function updateSession(request: NextRequest) {
       supabaseResponse.cookies.set(CAMPUSOS_ACTIVITY_COOKIE, String(now), cookieOptions);
     }
 
+    // Instant edge-level redirect if cached role cookie indicates non-admin navigating to root
+    const cachedRole = request.cookies.get(CAMPUSOS_ROLE_COOKIE)?.value;
+    if (pathname === '/' && cachedRole) {
+      if (cachedRole === 'student') {
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = '/student/dashboard';
+        return redirectWithCookies(redirectUrl, supabaseResponse);
+      }
+      if (cachedRole === 'teacher') {
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = '/teacher/dashboard';
+        return redirectWithCookies(redirectUrl, supabaseResponse);
+      }
+    }
+
     const adminClient = createAdminClient();
     const dbClient = adminClient || supabase;
 
@@ -260,15 +276,26 @@ export async function updateSession(request: NextRequest) {
       redirectUrl.searchParams.set('error', 'unauthorized');
       const response = NextResponse.redirect(redirectUrl);
 
-      // Clean up Supabase auth cookies
+      // Clean up Supabase auth and CampusOS role cookies
       request.cookies.getAll().forEach((cookie) => {
-        if (cookie.name.startsWith('sb-')) {
+        if (cookie.name.startsWith('sb-') || cookie.name.startsWith('campusos_')) {
           response.cookies.delete(cookie.name);
         }
       });
 
       return response;
     }
+
+    // Persist verified role in secure cookie for edge-level routing
+    const isRemembered = request.cookies.get(CAMPUSOS_REMEMBER_COOKIE)?.value === '1';
+    const roleCookieOptions = {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax' as const,
+      secure: process.env.NODE_ENV === 'production',
+      ...(isRemembered ? { maxAge: 30 * 24 * 60 * 60 } : {}),
+    };
+    supabaseResponse.cookies.set(CAMPUSOS_ROLE_COOKIE, role, roleCookieOptions);
 
     // Role-based destination for login page visits
     if (isLoginPage) {

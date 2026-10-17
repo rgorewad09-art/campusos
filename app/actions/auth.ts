@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation';
 import {
   CAMPUSOS_ACTIVITY_COOKIE,
   CAMPUSOS_REMEMBER_COOKIE,
+  CAMPUSOS_ROLE_COOKIE,
 } from '@/src/lib/session';
 
 export interface AuthActionState {
@@ -208,6 +209,52 @@ export async function loginAction(
     };
   }
 
+  // Authoritative Portal Validation: ensure authenticated role matches requested portal
+  const portal = formData.get('portal')?.toString().toLowerCase().trim();
+  if (portal) {
+    if (portal === 'student' && userRole !== 'student') {
+      await supabase.auth.signOut({ scope: 'local' });
+      const cookieStore = await cookies();
+      cookieStore.delete(CAMPUSOS_ACTIVITY_COOKIE);
+      cookieStore.delete(CAMPUSOS_REMEMBER_COOKIE);
+      cookieStore.delete(CAMPUSOS_ROLE_COOKIE);
+
+      const roleName = userRole === 'teacher' ? 'Faculty members' : 'Administrators';
+      const targetPortal = userRole === 'teacher' ? 'Faculty Portal' : 'Administrator Portal';
+      return {
+        error: `Portal mismatch: This login is for students only. ${roleName} must sign in through the ${targetPortal}.`,
+      };
+    }
+
+    if (portal === 'teacher' && userRole !== 'teacher') {
+      await supabase.auth.signOut({ scope: 'local' });
+      const cookieStore = await cookies();
+      cookieStore.delete(CAMPUSOS_ACTIVITY_COOKIE);
+      cookieStore.delete(CAMPUSOS_REMEMBER_COOKIE);
+      cookieStore.delete(CAMPUSOS_ROLE_COOKIE);
+
+      const roleName = userRole === 'student' ? 'Students' : 'Administrators';
+      const targetPortal = userRole === 'student' ? 'Student Portal' : 'Administrator Portal';
+      return {
+        error: `Portal mismatch: This login is for faculty members only. ${roleName} must sign in through the ${targetPortal}.`,
+      };
+    }
+
+    if (portal === 'admin' && userRole !== 'admin') {
+      await supabase.auth.signOut({ scope: 'local' });
+      const cookieStore = await cookies();
+      cookieStore.delete(CAMPUSOS_ACTIVITY_COOKIE);
+      cookieStore.delete(CAMPUSOS_REMEMBER_COOKIE);
+      cookieStore.delete(CAMPUSOS_ROLE_COOKIE);
+
+      const roleName = userRole === 'student' ? 'Students' : 'Faculty members';
+      const targetPortal = userRole === 'student' ? 'Student Portal' : 'Faculty Portal';
+      return {
+        error: `Portal mismatch: This login is for administrators only. ${roleName} must sign in through the ${targetPortal}.`,
+      };
+    }
+  }
+
   let destination = '/';
   if (userRole === 'student') {
     destination = '/student/dashboard';
@@ -234,6 +281,11 @@ export async function loginAction(
   });
 
   cookieStore.set(CAMPUSOS_REMEMBER_COOKIE, rememberMe ? '1' : '0', {
+    ...baseCookieOptions,
+    ...(rememberMe ? { maxAge: 30 * 24 * 60 * 60 } : {}),
+  });
+
+  cookieStore.set(CAMPUSOS_ROLE_COOKIE, userRole, {
     ...baseCookieOptions,
     ...(rememberMe ? { maxAge: 30 * 24 * 60 * 60 } : {}),
   });
@@ -369,6 +421,12 @@ export async function setupPasswordAction(
 
   const cookieStore = await cookies();
   cookieStore.set(CAMPUSOS_ACTIVITY_COOKIE, Date.now().toString(), {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
+  cookieStore.set(CAMPUSOS_ROLE_COOKIE, role, {
     path: '/',
     httpOnly: true,
     sameSite: 'lax',

@@ -1,8 +1,21 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #F7F7F7;
   --foreground: #171717;
+  --card-bg: #FFFFFF;
+  --card-border: #E5E5E5;
+  --text-muted: #737373;
+}
+
+html.dark {
+  --background: #0A0A0A;
+  --foreground: #EDEDED;
+  --card-bg: #141414;
+  --card-border: #262626;
+  --text-muted: #8C8C8C;
 }
 
 @theme inline {
@@ -16,6 +29,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 /* Smooth scrolling */
@@ -30,7 +44,64 @@ html {
   border-radius: 4px;
 }
 
-/* Subtle Monochromatic Shimmer Animation for Skeletons */
+html.dark :focus-visible {
+  outline-color: #EDEDED;
+}
+
+/* Monochromatic Dark Mode Surface & Text Overrides */
+html.dark .bg-white {
+  background-color: #141414 !important;
+}
+
+html.dark .bg-\[\#F7F7F7\] {
+  background-color: #0A0A0A !important;
+}
+
+html.dark .bg-\[\#FAFAFA\] {
+  background-color: #1A1A1A !important;
+}
+
+html.dark .border-\[\#E5E5E5\],
+html.dark .border-\[\#F0F0F0\] {
+  border-color: #262626 !important;
+}
+
+html.dark .text-\[\#171717\] {
+  color: #EDEDED !important;
+}
+
+html.dark .text-\[\#525252\] {
+  color: #B0B0B0 !important;
+}
+
+html.dark .text-\[\#737373\] {
+  color: #8C8C8C !important;
+}
+
+html.dark .hover\:bg-\[\#F7F7F7\]:hover,
+html.dark .hover\:bg-\[\#FAFAFA\]:hover {
+  background-color: #222222 !important;
+}
+
+html.dark .divide-\[\#E5E5E5\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #262626 !important;
+}
+
+/* Form Controls in Dark Mode */
+html.dark input:not([type="checkbox"]):not([type="radio"]),
+html.dark select,
+html.dark textarea {
+  background-color: #171717 !important;
+  color: #EDEDED !important;
+  border-color: #333333 !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #737373 !important;
+}
+
+/* Monochromatic Shimmer Animation for Skeletons */
 @keyframes campusos-shimmer {
   0% {
     transform: translateX(-100%);
@@ -44,6 +115,10 @@ html {
   position: relative;
   overflow: hidden;
   background-color: #EAEAEA;
+}
+
+html.dark .shimmer-effect {
+  background-color: #222222 !important;
 }
 
 .shimmer-effect::after {
@@ -63,6 +138,15 @@ html {
   content: '';
 }
 
+html.dark .shimmer-effect::after {
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0) 100%
+  ) !important;
+}
+
 /* Respect user's prefers-reduced-motion preference */
 @media (prefers-reduced-motion: reduce) {
   .shimmer-effect::after {
@@ -71,5 +155,8 @@ html {
   }
   .shimmer-effect {
     background-color: #E5E5E5;
+  }
+  html.dark .shimmer-effect {
+    background-color: #262626 !important;
   }
 }

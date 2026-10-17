@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useTransition } from 'react';
+import Link from 'next/link';
 import { Menu, Search, Bell, LogOut, Loader2 } from 'lucide-react';
 import { supabase } from '@/src/lib/supabase/client';
 import { logoutAction } from '@/app/actions/auth';
+import ThemeToggle from './ThemeToggle';
 
 interface HeaderProps {
   title: string;
@@ -12,17 +14,50 @@ interface HeaderProps {
 
 export default function Header({ title, onMenuOpen }: HeaderProps) {
   const [adminEmail, setAdminEmail] = useState<string>('admin@campusos.com');
+  const [adminDisplayName, setAdminDisplayName] = useState<string>('Administrator');
   const [initials, setInitials] = useState<string>('AD');
   const [isLoggingOut, startLogoutTransition] = useTransition();
 
+  function extractInitials(name: string, email?: string): string {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    if (parts.length === 1 && parts[0].length >= 2) {
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    if (email) {
+      return email.split('@')[0].slice(0, 2).toUpperCase();
+    }
+    return 'AD';
+  }
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user?.email) {
-        setAdminEmail(user.email);
-        const namePart = user.email.split('@')[0];
-        setInitials(namePart.slice(0, 2).toUpperCase());
+      if (user) {
+        if (user.email) setAdminEmail(user.email);
+        const resolvedName =
+          user.user_metadata?.display_name ||
+          user.user_metadata?.full_name ||
+          'Administrator';
+        setAdminDisplayName(resolvedName);
+        setInitials(extractInitials(resolvedName, user.email));
       }
     });
+
+    function handleProfileUpdate(e: Event) {
+      const customEvent = e as CustomEvent<{ displayName?: string }>;
+      if (customEvent.detail?.displayName) {
+        const newName = customEvent.detail.displayName;
+        setAdminDisplayName(newName);
+        setInitials(extractInitials(newName));
+      }
+    }
+
+    window.addEventListener('campusos_profile_updated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('campusos_profile_updated', handleProfileUpdate);
+    };
   }, []);
 
   function handleLogout() {
@@ -76,11 +111,18 @@ export default function Header({ title, onMenuOpen }: HeaderProps) {
           <Bell size={18} />
         </button>
 
+        {/* Theme Toggle */}
+        <ThemeToggle />
+
         {/* Divider */}
         <div className="hidden sm:block h-6 w-px bg-[#E5E5E5]" />
 
         {/* Administrator profile */}
-        <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
+        <Link
+          href="/settings"
+          className="flex items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-[#E5E5E5] transition-colors"
+          title="Manage Administrator Profile & Settings"
+        >
           <div
             className="flex h-8 w-8 items-center justify-center rounded-full bg-[#171717] text-xs font-semibold text-white select-none"
             aria-hidden="true"
@@ -88,14 +130,14 @@ export default function Header({ title, onMenuOpen }: HeaderProps) {
             {initials}
           </div>
           <div className="hidden md:block text-left">
-            <p className="text-xs font-semibold text-[#171717] leading-tight">
-              Administrator
+            <p className="text-xs font-semibold text-[#171717] leading-tight truncate max-w-[150px]">
+              {adminDisplayName}
             </p>
             <p className="text-[11px] text-[#737373] leading-tight truncate max-w-[150px]">
               {adminEmail}
             </p>
           </div>
-        </div>
+        </Link>
 
         {/* Sign Out Button */}
         <button

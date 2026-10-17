@@ -56,17 +56,27 @@ export async function getDashboardStatsAction(): Promise<{
 
     const todayDate = getLocalTodayString();
 
-    // 1. Fetch Students count by status
-    const { data: students, error: studentsError } = await supabase
-      .from('students')
-      .select('id, status');
+    // Run students, today attendance, and documents queries in parallel
+    const [studentsRes, attendanceRes, documentsRes] = await Promise.all([
+      supabase.from('students').select('id, status'),
+      supabase.from('attendance').select('id, student_id, status').eq('attendance_date', todayDate),
+      supabase.from('student_documents').select('id, verification_status'),
+    ]);
 
-    if (studentsError) {
-      console.error('[CampusOS Analytics] studentsError:', studentsError);
+    if (studentsRes.error) {
+      console.error('[CampusOS Analytics] studentsError:', studentsRes.error);
       return { success: false, error: 'Failed to load students statistics.' };
     }
+    if (attendanceRes.error) {
+      console.error('[CampusOS Analytics] attendanceError:', attendanceRes.error);
+      return { success: false, error: 'Failed to load attendance statistics.' };
+    }
+    if (documentsRes.error) {
+      console.error('[CampusOS Analytics] documentsError:', documentsRes.error);
+      return { success: false, error: 'Failed to load document statistics.' };
+    }
 
-    const studentList = students || [];
+    const studentList = studentsRes.data || [];
     const totalStudents = studentList.length;
     const activeStudents = studentList.filter((s) => s.status === 'active').length;
     const inactiveStudents = studentList.filter((s) => s.status === 'inactive').length;
@@ -74,21 +84,7 @@ export async function getDashboardStatsAction(): Promise<{
     const pendingStudents = studentList.filter((s) => s.status === 'pending').length;
     const suspendedStudents = studentList.filter((s) => s.status === 'suspended').length;
 
-    // 2. Fetch Today's Attendance
-    const { data: todayRecords, error: attendanceError } = await supabase
-      .from('attendance')
-      .select('id, student_id, status')
-      .eq('attendance_date', todayDate);
-
-    if (attendanceError) {
-      console.error('[CampusOS Analytics] attendanceError:', attendanceError);
-      return {
-        success: false,
-        error: 'Failed to load attendance statistics.',
-      };
-    }
-
-    const attendanceList = todayRecords || [];
+    const attendanceList = attendanceRes.data || [];
     const todayPresent = attendanceList.filter((a) => a.status === 'present').length;
     const todayAbsent = attendanceList.filter((a) => a.status === 'absent').length;
     const todayLate = attendanceList.filter((a) => a.status === 'late').length;
@@ -104,20 +100,7 @@ export async function getDashboardStatsAction(): Promise<{
         ? Math.round((todayPresent / totalRecordedToday) * 100)
         : null;
 
-    // 3. Fetch Documents by verification status
-    const { data: documents, error: documentsError } = await supabase
-      .from('student_documents')
-      .select('id, verification_status');
-
-    if (documentsError) {
-      console.error('[CampusOS Analytics] documentsError:', documentsError);
-      return {
-        success: false,
-        error: 'Failed to load document statistics.',
-      };
-    }
-
-    const docList = documents || [];
+    const docList = documentsRes.data || [];
     const totalDocuments = docList.length;
     const pendingDocuments = docList.filter((d) => d.verification_status === 'pending').length;
     const verifiedDocuments = docList.filter((d) => d.verification_status === 'verified').length;

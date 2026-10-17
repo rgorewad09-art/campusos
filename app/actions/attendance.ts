@@ -89,37 +89,41 @@ export async function getDailyAttendanceAction(
       studentQuery = studentQuery.eq('status', 'active');
     }
 
-    const { data: studentRows, error: studentError } = await studentQuery;
-    if (studentError) {
-      console.error('[CampusOS Attendance] Failed to load students:', studentError);
-      return { success: false, error: 'Failed to load students list.' };
-    }
-    const students = (studentRows as Student[]) || [];
-
-    // 2. Fetch attendance records for this specific date
-    const { data: dateRecords, error: dateRecordsError } = await supabase
+    const dateRecordsQuery = supabase
       .from('attendance')
       .select('*')
       .eq('attendance_date', date);
 
-    if (dateRecordsError) {
-      console.error('[CampusOS Attendance] Failed to load attendance records:', dateRecordsError);
+    const historyQuery = supabase
+      .from('attendance')
+      .select('student_id, status');
+
+    // Run all 3 queries concurrently
+    const [studentRes, dateRecordsRes, historyRes] = await Promise.all([
+      studentQuery,
+      dateRecordsQuery,
+      historyQuery,
+    ]);
+
+    if (studentRes.error) {
+      console.error('[CampusOS Attendance] Failed to load students:', studentRes.error);
+      return { success: false, error: 'Failed to load students list.' };
+    }
+    const students = (studentRes.data as Student[]) || [];
+
+    if (dateRecordsRes.error) {
+      console.error('[CampusOS Attendance] Failed to load attendance records:', dateRecordsRes.error);
       return {
         success: false,
         error: 'Failed to load attendance records for this date.',
       };
     }
-    const records = (dateRecords as AttendanceRecord[]) || [];
+    const records = (dateRecordsRes.data as AttendanceRecord[]) || [];
 
-    // 3. Fetch historical attendance records to compute each student's attendance percentage
-    // (present attendance records / all recorded attendance records * 100)
-    const { data: historyRows, error: historyError } = await supabase
-      .from('attendance')
-      .select('student_id, status');
-
-    if (historyError) {
-      console.warn('[CampusOS Attendance] Notice: Could not compute historical stats:', historyError.message);
+    if (historyRes.error) {
+      console.warn('[CampusOS Attendance] Notice: Could not compute historical stats:', historyRes.error.message);
     }
+    const historyRows = historyRes.data || [];
 
     const statsMap: Record<string, StudentAttendanceStats> = {};
 
@@ -223,49 +227,114 @@ export async function saveAttendanceBatchAction(
       }
     }
 
-    // 1. Prepare payload with admin's profile ID
-    const fullPayload = entries.map((entry) => ({
-      student_id: entry.studentId,
-      attendance_date: date,
-      status: entry.status,
-      remarks: entry.remarks ? entry.remarks.trim() : null,
-      recorded_by: user.id,
-    }));
-
-    // 2. Perform upsert on conflict (student_id, attendance_date)
-    let upsertResult = await supabase
+    // 1. Query existing records for this date and target students to prevent constraint mismatch errors
+    const studentIds = entries.map((e) => e.studentId);
+    const { data: existingRows, error: fetchErr } = await supabase
       .from('attendance')
-      .upsert(fullPayload, {
-        onConflict: 'student_id,attendance_date',
-      })
-      .select('*');
+      .select('id, student_id, session_id, subject_id')
+      .eq('attendance_date', date)
+      .in('student_id', studentIds);
 
-    // Fallback if 'remarks' column is not in initial database schema
-    if (upsertResult.error && upsertResult.error.message.includes('column')) {
-      const fallbackPayload = entries.map((entry) => ({
-        student_id: entry.studentId,
-        attendance_date: date,
-        status: entry.status,
-        recorded_by: user.id,
-      }));
-
-      upsertResult = await supabase
-        .from('attendance')
-        .upsert(fallbackPayload, {
-          onConflict: 'student_id,attendance_date',
-        })
-        .select('*');
-    }
-
-    if (upsertResult.error || !upsertResult.data) {
-      console.error('[CampusOS Attendance] saveAttendanceBatchAction error:', upsertResult.error);
+    if (fetchErr) {
+      console.error('[CampusOS Attendance] Error checking existing records:', fetchErr);
       return {
         success: false,
-        error: 'Could not save attendance records. Please try again.',
+        error: `Could not verify existing attendance records: ${fetchErr.message}`,
       };
     }
 
-    // 3. Log audit action
+    // Map existing records per student (prioritizing general daily records)
+    const existingMap = new Map<string, string>();
+    (existingRows || []).forEach((r) => {
+      if (!r.session_id && !r.subject_id) {
+        existingMap.set(r.student_id, r.id);
+      } else if (!existingMap.has(r.student_id)) {
+        existingMap.set(r.student_id, r.id);
+      }
+    });
+
+    const nowIso = new Date().toISOString();
+    const toUpdate: { id: string; status: AttendanceStatus; remarks: string | null }[] = [];
+    const toInsert: {
+      student_id: string;
+      attendance_date: string;
+      status: AttendanceStatus;
+      remarks: string | null;
+      recorded_by: string;
+      verification_method: string;
+      created_at: string;
+      updated_at: string;
+    }[] = [];
+
+    for (const entry of entries) {
+      const existingId = existingMap.get(entry.studentId);
+      const cleanRemarks = entry.remarks ? entry.remarks.trim() : null;
+
+      if (existingId) {
+        toUpdate.push({
+          id: existingId,
+          status: entry.status,
+          remarks: cleanRemarks,
+        });
+      } else {
+        toInsert.push({
+          student_id: entry.studentId,
+          attendance_date: date,
+          status: entry.status,
+          remarks: cleanRemarks,
+          recorded_by: user.id,
+          verification_method: 'manual',
+          created_at: nowIso,
+          updated_at: nowIso,
+        });
+      }
+    }
+
+    let savedCount = 0;
+
+    // 2. Perform batch insert for new attendance records
+    if (toInsert.length > 0) {
+      const { data: insertedData, error: insertError } = await supabase
+        .from('attendance')
+        .insert(toInsert)
+        .select('id');
+
+      if (insertError) {
+        console.error('[CampusOS Attendance] Batch insert error:', insertError);
+        return {
+          success: false,
+          error: `Failed to insert new attendance records: ${insertError.message}`,
+        };
+      }
+      savedCount += insertedData?.length || toInsert.length;
+    }
+
+    // 3. Perform updates for existing records
+    if (toUpdate.length > 0) {
+      const updatePromises = toUpdate.map(async (item) => {
+        const { data, error } = await supabase
+          .from('attendance')
+          .update({
+            status: item.status,
+            remarks: item.remarks,
+            recorded_by: user.id,
+            updated_at: nowIso,
+            verification_method: 'manual',
+          })
+          .eq('id', item.id)
+          .select('id');
+
+        if (error) {
+          throw new Error(`Failed to update attendance for record ${item.id}: ${error.message}`);
+        }
+        return data;
+      });
+
+      const updatedResults = await Promise.all(updatePromises);
+      savedCount += updatedResults.length;
+    }
+
+    // 4. Log audit action
     await logAuditAction({
       actorId: user.id,
       action: 'save_attendance_batch',
@@ -273,7 +342,7 @@ export async function saveAttendanceBatchAction(
       entityId: date,
       details: {
         attendance_date: date,
-        totalSaved: upsertResult.data.length,
+        totalSaved: savedCount,
         present: entries.filter((e) => e.status === 'present').length,
         absent: entries.filter((e) => e.status === 'absent').length,
         late: entries.filter((e) => e.status === 'late').length,
@@ -282,7 +351,7 @@ export async function saveAttendanceBatchAction(
 
     return {
       success: true,
-      savedCount: upsertResult.data.length,
+      savedCount,
     };
   } catch (err: unknown) {
     console.error('[CampusOS Attendance] saveAttendanceBatchAction unhandled error:', err);

@@ -833,29 +833,20 @@ export async function getTeacherPortalDataAction(): Promise<{
       };
     }
 
-    // 2. Fetch assignments
+    // 2. Fetch assignments & timetable concurrently in parallel
     let assignments: TeacherSubjectAssignment[] = [];
-    try {
-      const { data: assData } = await dbClient
+    let timetable: TimetableEntry[] = [];
+
+    const [assRes, ttRes] = await Promise.all([
+      dbClient
         .from('teacher_subject_assignments')
         .select(`
           *,
           course:courses(*),
           subject:subjects(*)
         `)
-        .eq('teacher_id', teacher.id);
-
-      if (assData) {
-        assignments = assData as TeacherSubjectAssignment[];
-      }
-    } catch {
-      // Table may not yet exist
-    }
-
-    // 3. Fetch teacher's timetable entries (both approved and proposed)
-    let timetable: TimetableEntry[] = [];
-    try {
-      const { data: ttData } = await dbClient
+        .eq('teacher_id', teacher.id),
+      dbClient
         .from('timetables')
         .select(`
           *,
@@ -864,13 +855,14 @@ export async function getTeacherPortalDataAction(): Promise<{
         `)
         .eq('teacher_id', teacher.id)
         .order('day_of_week', { ascending: true })
-        .order('start_time', { ascending: true });
+        .order('start_time', { ascending: true }),
+    ]);
 
-      if (ttData) {
-        timetable = ttData as TimetableEntry[];
-      }
-    } catch {
-      // Table may not yet exist
+    if (assRes.data) {
+      assignments = assRes.data as TeacherSubjectAssignment[];
+    }
+    if (ttRes.data) {
+      timetable = ttRes.data as TimetableEntry[];
     }
 
     // 4. Calculate today's classes
@@ -880,14 +872,23 @@ export async function getTeacherPortalDataAction(): Promise<{
     const todayDayOfWeek = jsDay === 0 ? 7 : jsDay;
     const todayClasses = timetable.filter((t) => t.day_of_week === todayDayOfWeek);
 
-    // 5. Fetch student roster for assigned sections & courses
+    // 5. Fetch student roster for assigned sections & courses (from assignments AND timetable)
     let rosterStudents: Student[] = [];
-    if (assignments.length > 0) {
-      try {
-        const assignedCourseIds = Array.from(new Set(assignments.map((a) => a.course_id)));
-        const assignedSections = Array.from(new Set(assignments.map((a) => a.section)));
+    const assignedCourseIds = Array.from(
+      new Set([
+        ...assignments.map((a) => a.course_id),
+        ...timetable.map((t) => t.course_id),
+      ].filter(Boolean))
+    );
+    const assignedSections = Array.from(
+      new Set([
+        ...assignments.map((a) => a.section),
+        ...timetable.map((t) => t.section),
+      ].filter(Boolean))
+    );
 
-        // Look for approved enrollments matching this teacher's courses & sections
+    if (assignedCourseIds.length > 0 && assignedSections.length > 0) {
+      try {
         const { data: enrollments } = await dbClient
           .from('student_academic_enrollments')
           .select(`

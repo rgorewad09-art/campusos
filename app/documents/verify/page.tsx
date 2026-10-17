@@ -1,5 +1,5 @@
 import AppShell from '../../components/AppShell';
-import PlaceholderPage from '../../components/PlaceholderPage';
+import DocumentsView from '../DocumentsView';
 import { requireServerAuth } from '@/src/lib/auth-guard';
 
 export default async function VerifyDocumentsPage() {
@@ -7,9 +7,10 @@ export default async function VerifyDocumentsPage() {
 
   return (
     <AppShell pageTitle="Verify Documents">
-      <PlaceholderPage
-        title="Verify Pending Documents"
-        description="Review and approve or reject student-submitted documents awaiting verification."
+      <DocumentsView
+        initialStatus="pending"
+        pageTitle="Verify Pending Documents"
+        pageSubtitle="Review, approve, or reject student-submitted documents awaiting verification."
       />
     </AppShell>
   );

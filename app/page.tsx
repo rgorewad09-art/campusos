@@ -1,3 +1,4 @@
+import { connection } from 'next/server';
 import AppShell from './components/AppShell';
 import DashboardView from './DashboardView';
 import { requireServerAuth } from '@/src/lib/auth-guard';
@@ -8,11 +9,12 @@ export const metadata = {
 };
 
 export default async function DashboardPage() {
-  await requireServerAuth(['admin']);
+  await connection();
+  const user = await requireServerAuth(['admin']);
 
   return (
     <AppShell pageTitle="Dashboard">
-      <DashboardView />
+      <DashboardView displayName={user.displayName} />
     </AppShell>
   );
 }

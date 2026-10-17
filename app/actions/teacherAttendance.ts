@@ -44,6 +44,37 @@ async function requireTeacherOrAdmin() {
     .eq('id', user.id)
     .maybeSingle();
 
+  // Self-heal: If profile row is missing or lacks role, check if user is a registered faculty member
+  if ((!profile || !profile.role) && user.email && adminClient) {
+    const cleanEmail = user.email.trim().toLowerCase();
+    const { data: matchedT } = await adminClient
+      .from('teachers')
+      .select('id, user_id, first_name, last_name, status')
+      .ilike('email', cleanEmail)
+      .neq('status', 'suspended')
+      .maybeSingle();
+
+    if (matchedT) {
+      if (!matchedT.user_id) {
+        await adminClient
+          .from('teachers')
+          .update({ user_id: user.id })
+          .eq('id', matchedT.id);
+      }
+
+      const displayName =
+        [matchedT.first_name, matchedT.last_name].filter(Boolean).join(' ') || 'Teacher';
+
+      await adminClient.from('profiles').upsert({
+        id: user.id,
+        display_name: displayName,
+        role: 'teacher',
+      });
+
+      profile = { id: user.id, role: 'teacher', display_name: displayName };
+    }
+  }
+
   if (!profile || !['admin', 'teacher'].includes(profile.role)) {
     throw new Error('Forbidden: Only faculty members or administrators can perform attendance management.');
   }
@@ -87,7 +118,7 @@ async function requireTeacherOrAdmin() {
 /**
  * Loads the complete context for a teacher's attendance portal:
  * - Teacher profile
- * - Assigned courses and subjects
+ * - Assigned courses and subjects (from both direct assignments and timetable scheduling)
  * - Active / today's timetable sessions
  * - Currently active attendance sessions
  */
@@ -109,8 +140,11 @@ export async function getTeacherAttendanceContextAction(): Promise<{
     let timetables: TimetableEntry[] = [];
     let activeSessions: AttendanceSession[] = [];
 
-    // If teacher role, fetch their assignments
+    // If teacher role, fetch their assignments from both direct subject assignments and timetable allocations
     if (teacherId) {
+      const assignmentMap = new Map<string, TeacherSubjectAssignment>();
+
+      // 1. Direct assignments
       const { data: assData } = await adminClient
         .from('teacher_subject_assignments')
         .select(`
@@ -120,9 +154,15 @@ export async function getTeacherAttendanceContextAction(): Promise<{
         `)
         .eq('teacher_id', teacherId);
 
-      if (assData) assignments = assData as TeacherSubjectAssignment[];
+      if (assData) {
+        (assData as TeacherSubjectAssignment[]).forEach((a) => {
+          const sec = (a.section || 'A').trim().toUpperCase();
+          const key = `${a.course_id}_${a.subject_id}_${a.semester}_${sec}`;
+          assignmentMap.set(key, { ...a, section: sec });
+        });
+      }
 
-      // Fetch timetable
+      // 2. Timetable schedule allocations
       const { data: ttData } = await adminClient
         .from('timetables')
         .select(`
@@ -134,7 +174,30 @@ export async function getTeacherAttendanceContextAction(): Promise<{
         .order('day_of_week', { ascending: true })
         .order('start_time', { ascending: true });
 
-      if (ttData) timetables = ttData as TimetableEntry[];
+      if (ttData) {
+        timetables = ttData as TimetableEntry[];
+        timetables.forEach((tt) => {
+          const sec = (tt.section || 'A').trim().toUpperCase();
+          const key = `${tt.course_id}_${tt.subject_id}_${tt.semester}_${sec}`;
+          if (!assignmentMap.has(key) && tt.course && tt.subject) {
+            assignmentMap.set(key, {
+              id: tt.id,
+              teacher_id: teacherId,
+              course_id: tt.course_id,
+              subject_id: tt.subject_id,
+              semester: tt.semester,
+              section: sec,
+              academic_term: tt.academic_term || '2026-Fall',
+              assigned_by: tt.approved_by || user.id,
+              assigned_at: tt.created_at,
+              course: tt.course,
+              subject: tt.subject,
+            } as TeacherSubjectAssignment);
+          }
+        });
+      }
+
+      assignments = Array.from(assignmentMap.values());
 
       // Fetch active sessions from attendance_sessions table
       try {
@@ -164,10 +227,12 @@ export async function getTeacherAttendanceContextAction(): Promise<{
           });
         }
       } catch (sessErr) {
-        console.warn('[CampusOS Teacher Attendance] attendance_sessions table pending migration:', sessErr);
+        console.warn('[CampusOS Teacher Attendance] attendance_sessions table query:', sessErr);
       }
     } else if (profile.role === 'admin') {
-      // Admin sees institutional assignments
+      // Admin sees institutional assignments across all faculty
+      const assignmentMap = new Map<string, TeacherSubjectAssignment>();
+
       const { data: assData } = await adminClient
         .from('teacher_subject_assignments')
         .select(`
@@ -175,8 +240,48 @@ export async function getTeacherAttendanceContextAction(): Promise<{
           course:courses(*),
           subject:subjects(*)
         `)
-        .limit(50);
-      if (assData) assignments = assData as TeacherSubjectAssignment[];
+        .limit(100);
+
+      if (assData) {
+        (assData as TeacherSubjectAssignment[]).forEach((a) => {
+          const sec = (a.section || 'A').trim().toUpperCase();
+          const key = `${a.course_id}_${a.subject_id}_${a.semester}_${sec}`;
+          assignmentMap.set(key, { ...a, section: sec });
+        });
+      }
+
+      const { data: ttData } = await adminClient
+        .from('timetables')
+        .select(`
+          *,
+          course:courses(*),
+          subject:subjects(*)
+        `)
+        .limit(100);
+
+      if (ttData) {
+        ttData.forEach((tt: any) => {
+          const sec = (tt.section || 'A').trim().toUpperCase();
+          const key = `${tt.course_id}_${tt.subject_id}_${tt.semester}_${sec}`;
+          if (!assignmentMap.has(key) && tt.course && tt.subject) {
+            assignmentMap.set(key, {
+              id: tt.id,
+              teacher_id: tt.teacher_id,
+              course_id: tt.course_id,
+              subject_id: tt.subject_id,
+              semester: tt.semester,
+              section: sec,
+              academic_term: tt.academic_term || '2026-Fall',
+              assigned_by: tt.approved_by || user.id,
+              assigned_at: tt.created_at,
+              course: tt.course,
+              subject: tt.subject,
+            } as TeacherSubjectAssignment);
+          }
+        });
+      }
+
+      assignments = Array.from(assignmentMap.values());
     }
 
     return {
@@ -228,16 +333,37 @@ export async function getTeacherSessionRosterAction(params: {
 
     // 1. Verify teacher is assigned to this course, subject, section (unless admin)
     if (profile.role === 'teacher' && teacher) {
+      let isAssigned = false;
+
+      // Check direct assignment
       const { data: assignment } = await adminClient
         .from('teacher_subject_assignments')
         .select('id')
         .eq('teacher_id', teacher.id)
         .eq('course_id', params.courseId)
         .eq('subject_id', params.subjectId)
-        .eq('section', cleanSection)
+        .ilike('section', cleanSection)
         .maybeSingle();
 
-      if (!assignment) {
+      if (assignment) {
+        isAssigned = true;
+      } else {
+        // Check timetable schedule allocation
+        const { data: ttAssignment } = await adminClient
+          .from('timetables')
+          .select('id')
+          .eq('teacher_id', teacher.id)
+          .eq('course_id', params.courseId)
+          .eq('subject_id', params.subjectId)
+          .ilike('section', cleanSection)
+          .maybeSingle();
+
+        if (ttAssignment) {
+          isAssigned = true;
+        }
+      }
+
+      if (!isAssigned) {
         return {
           success: false,
           error: 'Forbidden: You are not assigned to instruct this course, subject, and section.',
@@ -246,14 +372,21 @@ export async function getTeacherSessionRosterAction(params: {
     }
 
     // 2. Fetch approved student academic enrollments for this course and section
+    const studentMap = new Map<string, Student>();
+
     const { data: enrollments, error: enrollError } = await adminClient
       .from('student_academic_enrollments')
       .select(`
+        id,
+        course_id,
+        semester,
+        section,
+        status,
         student:students(*)
       `)
       .eq('course_id', params.courseId)
       .eq('semester', params.semester)
-      .eq('section', cleanSection)
+      .ilike('section', cleanSection)
       .eq('status', 'approved');
 
     if (enrollError) {
@@ -261,17 +394,35 @@ export async function getTeacherSessionRosterAction(params: {
       return { success: false, error: 'Failed to retrieve enrolled student roster.' };
     }
 
-    const enrolledStudents: Student[] = [];
     if (enrollments) {
       for (const item of enrollments) {
         const s = (item as any).student as Student | undefined;
         if (s && s.status === 'active') {
-          enrolledStudents.push(s);
+          studentMap.set(s.id, s);
         }
       }
     }
 
-    // Sort students by student_code
+    // Also check student_selected_subjects to include any student who specifically selected this subject
+    const { data: subjectSelections } = await adminClient
+      .from('student_selected_subjects')
+      .select(`
+        student_id,
+        student:students(*)
+      `)
+      .eq('subject_id', params.subjectId)
+      .eq('status', 'approved');
+
+    if (subjectSelections) {
+      for (const item of subjectSelections) {
+        const s = (item as any).student as Student | undefined;
+        if (s && s.status === 'active' && !studentMap.has(s.id)) {
+          studentMap.set(s.id, s);
+        }
+      }
+    }
+
+    const enrolledStudents = Array.from(studentMap.values());
     enrolledStudents.sort((a, b) => a.student_code.localeCompare(b.student_code));
 
     // 3. Fetch existing attendance records
@@ -581,6 +732,7 @@ export async function overrideStudentAttendanceAction(params: {
 
     // Verify teacher assignment if not admin
     if (profile.role === 'teacher' && teacher && subjectId) {
+      let isAssigned = false;
       const { data: assignment } = await adminClient
         .from('teacher_subject_assignments')
         .select('id')
@@ -588,7 +740,22 @@ export async function overrideStudentAttendanceAction(params: {
         .eq('subject_id', subjectId)
         .maybeSingle();
 
-      if (!assignment && !params.sessionId) {
+      if (assignment) {
+        isAssigned = true;
+      } else {
+        const { data: ttAssignment } = await adminClient
+          .from('timetables')
+          .select('id')
+          .eq('teacher_id', teacher.id)
+          .eq('subject_id', subjectId)
+          .maybeSingle();
+
+        if (ttAssignment) {
+          isAssigned = true;
+        }
+      }
+
+      if (!isAssigned && !params.sessionId) {
         return {
           success: false,
           error: 'Forbidden: You can only record attendance for your assigned subjects.',
